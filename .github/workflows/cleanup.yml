@@ -19,8 +19,8 @@ jobs:
       - name: remove docker tag
         shell: bash
         env:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ steps.dockertag.outputs.replaced }}
         run: |
-          docker run --rm lumir/remove-dockerhub-tag --user "$username" --password "$password" cloudb0x/autoscan:$tag
+          docker run --rm lumir/remove-dockerhub-tag --user "$username" --password "$password" ghcr.io/darthshadow/autoscan:$tag
