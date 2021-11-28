@@ -97,6 +97,10 @@ func (t target) getScanLibrary(folder string) (*library, error) {
 		if strings.HasPrefix(folder, l.Path) {
 			return &l, nil
 		}
+		// Library root path
+		if autoscan.CleanedPathEqual(folder, l.Path) {
+			return &l, nil
+		}
 	}
 
 	return nil, fmt.Errorf("%v: failed determining library", folder)
