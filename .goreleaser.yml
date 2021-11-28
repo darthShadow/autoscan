@@ -8,15 +8,9 @@ builds:
       - CGO_ENABLED=0
     goos:
       - linux
-      - darwin
-      - freebsd
     main: ./cmd/autoscan
     goarch:
       - amd64
-      - arm64
-      - arm
-    goarm:
-      - 7
     ldflags:
       - -s -w
       - -X "main.Version={{ .Version }}"
