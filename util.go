@@ -23,3 +23,7 @@ func DSN(path string, q url.Values) string {
 
 	return u.String()
 }
+
+func CleanedPathEqual(scanFolder, libraryPath string) bool {
+	return path.Clean(scanFolder) == path.Clean(libraryPath)
+}
