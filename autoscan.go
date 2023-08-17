@@ -13,9 +13,10 @@ import (
 //
 // The Scan is used across Triggers, Targets and the Processor.
 type Scan struct {
-	Folder   string
-	Priority int
-	Time     time.Time
+	Folder       string
+	RelativePath string
+	Priority     int
+	Time         time.Time
 }
 
 type ProcessorFunc func(...Scan) error

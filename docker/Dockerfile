@@ -12,7 +12,7 @@ ENV \
   AUTOSCAN_VERBOSITY="0"
 
 # Binary
-COPY ["./dist/autoscan_${TARGETOS}_${TARGETARCH}${TARGETVARIANT:+_7}/autoscan", "/app/autoscan/autoscan"]
+COPY ["./dist/autoscan_${TARGETOS}_${TARGETARCH}${TARGETVARIANT:+_7}_v2/autoscan", "/app/autoscan/autoscan"]
 
 # Add root files
 COPY ["./docker/run", "/etc/services.d/autoscan/run"]

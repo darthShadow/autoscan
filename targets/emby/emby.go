@@ -2,6 +2,7 @@ package emby
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -76,15 +77,20 @@ func (t target) Scan(scan autoscan.Scan) error {
 		return nil
 	}
 
+	scanPath := scanFolder
+	if scan.RelativePath != "" {
+		scanPath = path.Join(scanFolder, scan.RelativePath)
+	}
+
 	l := t.log.With().
-		Str("path", scanFolder).
+		Str("path", scanPath).
 		Str("library", lib.Name).
 		Logger()
 
 	// send scan request
 	l.Trace().Msg("Sending scan request")
 
-	if err := t.api.Scan(scanFolder); err != nil {
+	if err := t.api.Scan(scanPath); err != nil {
 		return err
 	}
 

@@ -33,15 +33,16 @@ func newDatastore(db *sql.DB, mg *migrate.Migrator) (*datastore, error) {
 }
 
 const sqlUpsert = `
-INSERT INTO scan (folder, priority, time)
-VALUES (?, ?, ?)
+INSERT INTO scan (folder, relative_path, priority, time)
+VALUES (?, ?, ?, ?)
 ON CONFLICT (folder) DO UPDATE SET
 	priority = MAX(excluded.priority, scan.priority),
+    relative_path = excluded.relative_path,
 	time = excluded.time
 `
 
 func (store *datastore) upsert(tx *sql.Tx, scan autoscan.Scan) error {
-	_, err := tx.Exec(sqlUpsert, scan.Folder, scan.Priority, scan.Time)
+	_, err := tx.Exec(sqlUpsert, scan.Folder, scan.RelativePath, scan.Priority, scan.Time)
 	return err
 }
 
@@ -82,7 +83,7 @@ func (store *datastore) GetScansRemaining() (int, error) {
 }
 
 const sqlGetAvailableScan = `
-SELECT folder, priority, time FROM scan
+SELECT folder, relative_path, priority, time FROM scan
 WHERE time < ?
 ORDER BY priority DESC, time ASC
 LIMIT 1
@@ -92,7 +93,7 @@ func (store *datastore) GetAvailableScan(minAge time.Duration) (autoscan.Scan, e
 	row := store.QueryRow(sqlGetAvailableScan, now().Add(-1*minAge))
 
 	scan := autoscan.Scan{}
-	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time)
+	err := row.Scan(&scan.Folder, &scan.RelativePath, &scan.Priority, &scan.Time)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return scan, autoscan.ErrNoScans
@@ -104,7 +105,7 @@ func (store *datastore) GetAvailableScan(minAge time.Duration) (autoscan.Scan, e
 }
 
 const sqlGetAll = `
-SELECT folder, priority, time FROM scan
+SELECT folder, relative_path, priority, time FROM scan
 `
 
 func (store *datastore) GetAll() (scans []autoscan.Scan, err error) {
@@ -112,11 +113,13 @@ func (store *datastore) GetAll() (scans []autoscan.Scan, err error) {
 	if err != nil {
 		return scans, err
 	}
+	defer func() {
+		_ = rows.Close()
+	}()
 
-	defer rows.Close()
 	for rows.Next() {
 		scan := autoscan.Scan{}
-		err = rows.Scan(&scan.Folder, &scan.Priority, &scan.Time)
+		err = rows.Scan(&scan.Folder, &scan.RelativePath, &scan.Priority, &scan.Time)
 		if err != nil {
 			return scans, err
 		}

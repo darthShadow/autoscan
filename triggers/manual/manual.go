@@ -47,11 +47,9 @@ type handler struct {
 }
 
 func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	var err error
 	rlog := hlog.FromRequest(r)
 
 	query := r.URL.Query()
-	directories := query["dir"]
 
 	switch r.Method {
 	case "GET":
@@ -63,13 +61,15 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(directories) == 0 {
-		rlog.Error().Msg("Manual webhook should receive at least one directory")
+	directories := query["dir"]
+	paths := query["path"]
+	if len(directories) == 0 && len(paths) == 0 {
+		rlog.Error().Msg("Manual webhook should receive at least one directory or path")
 		rw.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	rlog.Trace().Interface("dirs", directories).Msg("Received directories")
+	rlog.Trace().Strs("dirs", directories).Strs("paths", paths).Msg("Received directories & paths")
 
 	scans := make([]autoscan.Scan, 0)
 
@@ -84,7 +84,22 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	err = h.callback(scans...)
+	for _, p := range paths {
+		folder, relativePath := path.Split(path.Clean(p))
+
+		// Rewrite the path based on the provided rewriter.
+		folderPath := h.rewrite(path.Clean(folder))
+
+		scans = append(scans, autoscan.Scan{
+			Folder:       folderPath,
+			RelativePath: relativePath,
+			Priority:     h.priority,
+			Time:         now(),
+		})
+
+	}
+
+	err := h.callback(scans...)
 	if err != nil {
 		rlog.Error().Err(err).Msg("Processor could not process scans")
 		rw.WriteHeader(http.StatusInternalServerError)
@@ -95,6 +110,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	for _, scan := range scans {
 		rlog.Info().
 			Str("path", scan.Folder).
+			Str("relative_path", scan.RelativePath).
 			Msg("Scan moved to processor")
 	}
 }

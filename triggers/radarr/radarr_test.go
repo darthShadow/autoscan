@@ -54,9 +54,10 @@ func TestHandler(t *testing.T) {
 				StatusCode: 200,
 				Scans: []autoscan.Scan{
 					{
-						Folder:   "/mnt/unionfs/Media/Movies/Interstellar (2014)",
-						Priority: 5,
-						Time:     currentTime,
+						Folder:       "/mnt/unionfs/Media/Movies/Interstellar (2014)",
+						RelativePath: "Interstellar.2014.UHD.BluRay.2160p.REMUX.mkv",
+						Priority:     5,
+						Time:         currentTime,
 					},
 				},
 			},
@@ -71,9 +72,10 @@ func TestHandler(t *testing.T) {
 				StatusCode: 200,
 				Scans: []autoscan.Scan{
 					{
-						Folder:   "/mnt/unionfs/Media/Movies/Tenet (2020)",
-						Priority: 5,
-						Time:     currentTime,
+						Folder:       "/mnt/unionfs/Media/Movies/Tenet (2020)",
+						RelativePath: "Tenet.2020.mkv",
+						Priority:     5,
+						Time:         currentTime,
 					},
 				},
 			},
