@@ -81,7 +81,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var paths []string
+	paths := make(map[string]string)
 
 	// a Download event is either an upgrade or a new file.
 	// the EpisodeFileDelete event shares the same request format as Download.
@@ -94,7 +94,9 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 		// Use path.Dir to get the directory in which the file is located
 		folderPath := path.Dir(path.Join(event.Series.Path, event.File.RelativePath))
-		paths = append(paths, folderPath)
+		// Use path.Base to get the filename
+		filePath := path.Base(path.Join(event.Series.Path, event.File.RelativePath))
+		paths[folderPath] = filePath
 	}
 
 	// An entire show has been deleted
@@ -106,7 +108,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		}
 
 		// Scan the folder of the show
-		paths = append(paths, event.Series.Path)
+		paths[event.Series.Path] = ""
 	}
 
 	if strings.EqualFold(event.Type, "Rename") {
@@ -121,31 +123,34 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 		for _, renamedFile := range event.RenamedFiles {
 			previousPath := path.Dir(renamedFile.PreviousPath)
+			previousFile := path.Base(renamedFile.PreviousPath)
 			currentPath := path.Dir(path.Join(event.Series.Path, renamedFile.RelativePath))
+			currentFile := path.Base(path.Join(event.Series.Path, renamedFile.RelativePath))
 
 			// if previousPath not in paths, then add it.
 			if _, ok := encountered[previousPath]; !ok {
 				encountered[previousPath] = true
-				paths = append(paths, previousPath)
+				paths[previousPath] = previousFile
 			}
 
 			// if currentPath not in paths, then add it.
 			if _, ok := encountered[currentPath]; !ok {
 				encountered[currentPath] = true
-				paths = append(paths, currentPath)
+				paths[currentPath] = currentFile
 			}
 		}
 	}
 
 	var scans []autoscan.Scan
 
-	for _, folderPath := range paths {
+	for folderPath, filePath := range paths {
 		folderPath := h.rewrite(folderPath)
 
 		scan := autoscan.Scan{
-			Folder:   folderPath,
-			Priority: h.priority,
-			Time:     now(),
+			Folder:       folderPath,
+			RelativePath: filePath,
+			Priority:     h.priority,
+			Time:         now(),
 		}
 
 		scans = append(scans, scan)

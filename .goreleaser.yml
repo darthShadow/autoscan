@@ -11,6 +11,8 @@ builds:
     main: ./cmd/autoscan
     goarch:
       - amd64
+    goamd64:
+      - v2
     ldflags:
       - -s -w
       - -X "main.Version={{ .Version }}"
@@ -18,11 +20,6 @@ builds:
       - -X "main.Timestamp={{ .Timestamp }}"
     flags:
       - -trimpath
-    ignore:
-      - goos: freebsd
-        goarch: arm64
-      - goos: freebsd
-        goarch: arm
 
 # MacOS Universal Binaries
 universal_binaries:

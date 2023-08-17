@@ -168,7 +168,9 @@ func main() {
 			Err(err).
 			Msg("Failed opening config")
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	// set default values
 	c := config{
@@ -353,10 +355,9 @@ func main() {
 	targetsAvailable := false
 	targetsSize := len(targets)
 	for {
-		// sleep indefinitely when no targets setup
+		// exit when no targets setup
 		if targetsSize == 0 {
-			log.Warn().Msg("No targets initialised, processor stopped, triggers will continue...")
-			select {}
+			log.Fatal().Msg("No targets initialised, exiting...")
 		}
 
 		// target availability checker
@@ -365,18 +366,12 @@ func main() {
 			switch {
 			case err == nil:
 				targetsAvailable = true
+
 			case errors.Is(err, autoscan.ErrFatal):
-				log.Error().
-					Err(err).
-					Msg("Fatal error occurred while checking target availability, processor stopped, triggers will continue...")
+				log.Fatal().Err(err).Msg("Fatal error occurred while checking target availability, exiting...")
 
-				// sleep indefinitely
-				select {}
 			default:
-				log.Error().
-					Err(err).
-					Msg("Not all targets are available, retrying in 15 seconds...")
-
+				log.Error().Err(err).Msg("Not all targets are available, retrying in 15 seconds...")
 				time.Sleep(15 * time.Second)
 				continue
 			}
@@ -391,40 +386,24 @@ func main() {
 
 		case errors.Is(err, autoscan.ErrNoScans):
 			// No scans currently available, let's wait a couple of seconds
-			log.Trace().
-				Msg("No scans are available, retrying in 15 seconds...")
-
+			log.Trace().Msg("No scans are available, retrying in 15 seconds...")
 			time.Sleep(15 * time.Second)
 
 		case errors.Is(err, autoscan.ErrAnchorUnavailable):
-			log.Error().
-				Err(err).
-				Msg("Not all anchor files are available, retrying in 15 seconds...")
-
+			log.Error().Err(err).Msg("Not all anchor files are available, retrying in 15 seconds...")
 			time.Sleep(15 * time.Second)
 
 		case errors.Is(err, autoscan.ErrTargetUnavailable):
 			targetsAvailable = false
-			log.Error().
-				Err(err).
-				Msg("Not all targets are available, retrying in 15 seconds...")
-
+			log.Error().Err(err).Msg("Not all targets are available, retrying in 15 seconds...")
 			time.Sleep(15 * time.Second)
 
 		case errors.Is(err, autoscan.ErrFatal):
-			// fatal error occurred, processor must stop (however, triggers must not)
-			log.Error().
-				Err(err).
-				Msg("Fatal error occurred while processing targets, processor stopped, triggers will continue...")
-
-			// sleep indefinitely
-			select {}
+			log.Error().Err(err).Msg("Fatal error occurred while processing targets, exiting...")
 
 		default:
 			// unexpected error
-			log.Fatal().
-				Err(err).
-				Msg("Failed processing targets")
+			log.Fatal().Err(err).Msg("Failed processing targets, exiting...")
 		}
 	}
 }

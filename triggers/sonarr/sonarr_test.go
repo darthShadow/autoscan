@@ -54,9 +54,10 @@ func TestHandler(t *testing.T) {
 				StatusCode: 200,
 				Scans: []autoscan.Scan{
 					{
-						Folder:   "/mnt/unionfs/Media/TV/Westworld/Season 1",
-						Priority: 5,
-						Time:     currentTime,
+						Folder:       "/mnt/unionfs/Media/TV/Westworld/Season 1",
+						RelativePath: "Westworld.S01E01.mkv",
+						Priority:     5,
+						Time:         currentTime,
 					},
 				},
 			},
@@ -71,9 +72,10 @@ func TestHandler(t *testing.T) {
 				StatusCode: 200,
 				Scans: []autoscan.Scan{
 					{
-						Folder:   "/mnt/unionfs/Media/TV/Westworld/Season 2",
-						Priority: 5,
-						Time:     currentTime,
+						Folder:       "/mnt/unionfs/Media/TV/Westworld/Season 2",
+						RelativePath: "Westworld.S02E01.mkv",
+						Priority:     5,
+						Time:         currentTime,
 					},
 				},
 			},
@@ -88,24 +90,28 @@ func TestHandler(t *testing.T) {
 				StatusCode: 200,
 				Scans: []autoscan.Scan{
 					{
-						Folder:   "/mnt/unionfs/Media/TV/Westworld/Season 1",
-						Priority: 5,
-						Time:     currentTime,
+						Folder:       "/mnt/unionfs/Media/TV/Westworld/Season 1",
+						RelativePath: "Westworld.S01E01.mkv",
+						Priority:     5,
+						Time:         currentTime,
 					},
 					{
-						Folder:   "/mnt/unionfs/Media/TV/Westworld [imdb:tt0475784]/Season 1",
-						Priority: 5,
-						Time:     currentTime,
+						Folder:       "/mnt/unionfs/Media/TV/Westworld [imdb:tt0475784]/Season 1",
+						RelativePath: "Westworld.S01E01.mkv",
+						Priority:     5,
+						Time:         currentTime,
 					},
 					{
-						Folder:   "/mnt/unionfs/Media/TV/Westworld/Season 2",
-						Priority: 5,
-						Time:     currentTime,
+						Folder:       "/mnt/unionfs/Media/TV/Westworld/Season 2",
+						RelativePath: "Westworld.S01E02.mkv",
+						Priority:     5,
+						Time:         currentTime,
 					},
 					{
-						Folder:   "/mnt/unionfs/Media/TV/Westworld [imdb:tt0475784]/Season 2",
-						Priority: 5,
-						Time:     currentTime,
+						Folder:       "/mnt/unionfs/Media/TV/Westworld [imdb:tt0475784]/Season 2",
+						RelativePath: "Westworld.S02E01.mkv",
+						Priority:     5,
+						Time:         currentTime,
 					},
 				},
 			},
@@ -155,8 +161,8 @@ func TestHandler(t *testing.T) {
 				if !reflect.DeepEqual(tc.Expected.Scans, scans) {
 					t.Log(scans)
 					t.Log(tc.Expected.Scans)
-					t.Errorf("Scans do not equal")
-					return errors.New("Scans do not equal")
+					t.Errorf("Scans are not equal")
+					return errors.New("scans are not equal")
 				}
 
 				return nil

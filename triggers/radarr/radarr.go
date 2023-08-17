@@ -75,7 +75,10 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var folderPath string
+	var (
+		folderPath string
+		filePath   string
+	)
 
 	if strings.EqualFold(event.Type, "Download") || strings.EqualFold(event.Type, "MovieFileDelete") {
 		if event.File.RelativePath == "" || event.Movie.FolderPath == "" {
@@ -85,6 +88,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		}
 
 		folderPath = path.Dir(path.Join(event.Movie.FolderPath, event.File.RelativePath))
+		filePath = path.Base(path.Join(event.Movie.FolderPath, event.File.RelativePath))
 	}
 
 	if strings.EqualFold(event.Type, "MovieDelete") || strings.EqualFold(event.Type, "Rename") {
@@ -98,9 +102,10 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	scan := autoscan.Scan{
-		Folder:   h.rewrite(folderPath),
-		Priority: h.priority,
-		Time:     now(),
+		Folder:       h.rewrite(folderPath),
+		RelativePath: filePath,
+		Priority:     h.priority,
+		Time:         now(),
 	}
 
 	err = h.callback(scan)

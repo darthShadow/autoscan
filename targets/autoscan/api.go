@@ -77,7 +77,7 @@ func (c apiClient) Available() error {
 	return nil
 }
 
-func (c apiClient) Scan(path string) error {
+func (c apiClient) Scan(folder string, path string) error {
 	// create request
 	req, err := http.NewRequest("POST", autoscan.JoinURL(c.baseURL, "triggers", "manual"), nil)
 	if err != nil {
@@ -89,7 +89,13 @@ func (c apiClient) Scan(path string) error {
 	}
 
 	q := url.Values{}
-	q.Add("dir", path)
+
+	if path == "" {
+		q.Add("dir", folder)
+	} else {
+		q.Add("path", path)
+	}
+
 	req.URL.RawQuery = q.Encode()
 
 	// send request

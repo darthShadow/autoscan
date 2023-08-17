@@ -3,4 +3,4 @@ CREATE TABLE IF NOT EXISTS scan (
     "priority" INTEGER NOT NULL,
     "time" DATETIME NOT NULL,
     PRIMARY KEY(folder)
-)
+);

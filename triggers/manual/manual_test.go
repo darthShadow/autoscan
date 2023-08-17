@@ -34,7 +34,11 @@ func TestHandler(t *testing.T) {
 		Rewrite: []autoscan.Rewrite{{
 			From: "/Movies/*",
 			To:   "/mnt/unionfs/Media/Movies/$1",
-		}},
+		}, {
+			From: "/TV/*",
+			To:   "/mnt/unionfs/Media/TV/$1",
+		},
+		},
 	}
 
 	currentTime := time.Now()
@@ -70,14 +74,97 @@ func TestHandler(t *testing.T) {
 				StatusCode: 200,
 				Scans: []autoscan.Scan{
 					{
-						Folder:   "/mnt/unionfs/Media/Movies/Interstellar (2014)",
-						Priority: 5,
-						Time:     currentTime,
+						Folder:       "/mnt/unionfs/Media/Movies/Interstellar (2014)",
+						RelativePath: "",
+						Priority:     5,
+						Time:         currentTime,
 					},
 					{
-						Folder:   "/mnt/unionfs/Media/Movies/Parasite (2019)",
-						Priority: 5,
-						Time:     currentTime,
+						Folder:       "/mnt/unionfs/Media/Movies/Parasite (2019)",
+						RelativePath: "",
+						Priority:     5,
+						Time:         currentTime,
+					},
+				},
+			},
+		},
+		{
+			"Returns 200 when given multiple paths",
+			Given{
+				Config: standardConfig,
+				Query: url.Values{
+					"path": []string{
+						"/Movies/Interstellar (2014)/Interstellar.mkv",
+						"/Movies/Parasite (2019)/Parasite.mkv",
+						"/TV/Chernobyl (2019)/Season 1/Chernobyl S01E01.mkv",
+					},
+				},
+			},
+			Expected{
+				StatusCode: 200,
+				Scans: []autoscan.Scan{
+					{
+						Folder:       "/mnt/unionfs/Media/Movies/Interstellar (2014)",
+						RelativePath: "Interstellar.mkv",
+						Priority:     5,
+						Time:         currentTime,
+					},
+					{
+						Folder:       "/mnt/unionfs/Media/Movies/Parasite (2019)",
+						RelativePath: "Parasite.mkv",
+						Priority:     5,
+						Time:         currentTime,
+					},
+					{
+						Folder:       "/mnt/unionfs/Media/TV/Chernobyl (2019)/Season 1",
+						RelativePath: "Chernobyl S01E01.mkv",
+						Priority:     5,
+						Time:         currentTime,
+					},
+				},
+			},
+		},
+		{
+			"Returns 200 when given multiple paths & directories",
+			Given{
+				Config: standardConfig,
+				Query: url.Values{
+					"dir": []string{
+						"/Movies/Interstellar (2014)",
+						"/TV/Westworld [imdb:tt0475784]/Season 2/Westworld.S02E01.mkv",
+					},
+					"path": []string{
+						"/Movies/Parasite (2019)/Parasite.mkv",
+						"/TV/Chernobyl (2019)/Season 1/Chernobyl S01E01.mkv",
+					},
+				},
+			},
+			Expected{
+				StatusCode: 200,
+				Scans: []autoscan.Scan{
+					{
+						Folder:       "/mnt/unionfs/Media/Movies/Interstellar (2014)",
+						RelativePath: "",
+						Priority:     5,
+						Time:         currentTime,
+					},
+					{
+						Folder:       "/mnt/unionfs/Media/TV/Westworld [imdb:tt0475784]/Season 2/Westworld.S02E01.mkv",
+						RelativePath: "",
+						Priority:     5,
+						Time:         currentTime,
+					},
+					{
+						Folder:       "/mnt/unionfs/Media/Movies/Parasite (2019)",
+						RelativePath: "Parasite.mkv",
+						Priority:     5,
+						Time:         currentTime,
+					},
+					{
+						Folder:       "/mnt/unionfs/Media/TV/Chernobyl (2019)/Season 1",
+						RelativePath: "Chernobyl S01E01.mkv",
+						Priority:     5,
+						Time:         currentTime,
 					},
 				},
 			},

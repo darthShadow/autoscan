@@ -1,6 +1,8 @@
 package autoscan
 
 import (
+	"path"
+
 	"github.com/rs/zerolog"
 
 	"github.com/cloudbox/autoscan"
@@ -48,14 +50,20 @@ func New(c Config) (autoscan.Target, error) {
 func (t target) Scan(scan autoscan.Scan) error {
 	scanFolder := t.rewrite(scan.Folder)
 
+	scanPath := ""
+	if scan.RelativePath != "" {
+		scanPath = path.Join(scan.Folder, scan.RelativePath)
+	}
+
 	// send scan request
 	l := t.log.With().
-		Str("path", scanFolder).
+		Str("folder", scanFolder).
+		Str("path", scanPath).
 		Logger()
 
 	l.Trace().Msg("Sending scan request")
 
-	if err := t.api.Scan(scanFolder); err != nil {
+	if err := t.api.Scan(scanFolder, scanPath); err != nil {
 		return err
 	}
 
