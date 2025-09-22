@@ -43,7 +43,7 @@ func TestHandler(t *testing.T) {
 		return currentTime
 	}
 
-	var testCases = []Test{
+	testCases := []Test{
 		{
 			"Scan has all the correct fields",
 			Given{
@@ -77,7 +77,8 @@ func TestHandler(t *testing.T) {
 						Folder:   "/mnt/unionfs/Media/Music/blink‐182/California (2016)/CD 02",
 						Priority: 5,
 						Time:     currentTime,
-					}},
+					},
+				},
 			},
 		},
 		{

@@ -3,11 +3,9 @@ package migrate
 import (
 	"database/sql"
 	"embed"
-	"errors"
 	"fmt"
 
 	"github.com/oriser/regroup"
-	"modernc.org/sqlite"
 )
 
 type Migrator struct {
@@ -25,11 +23,6 @@ func New(db *sql.DB, dir string) (*Migrator, error) {
 	m := &Migrator{
 		db:  db,
 		dir: dir,
-	}
-
-	// validate supported driver
-	if _, ok := db.Driver().(*sqlite.Driver); !ok {
-		return nil, errors.New("database instance is not using the sqlite driver")
 	}
 
 	// verify schema

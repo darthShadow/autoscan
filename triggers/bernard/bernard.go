@@ -66,7 +66,6 @@ func New(c Config, db *sql.DB) (autoscan.Trigger, error) {
 
 	var drives []drive
 	for _, d := range c.Drives {
-		d := d
 
 		rewriter, err := autoscan.NewRewriter(append(d.Rewrite, c.Rewrite...))
 		if err != nil {
@@ -161,7 +160,7 @@ func (s *syncJob) Run() {
 		return
 
 	case errors.Is(err, lowe.ErrInvalidCredentials), errors.Is(err, ds.ErrDataAnomaly), errors.Is(err, lowe.ErrNetwork):
-		//retryable error occurred
+		// retryable error occurred
 		s.log.Trace().
 			Err(err).
 			Int("attempts", s.attempts).
@@ -211,7 +210,6 @@ func (d daemon) startAutoSync() error {
 	c := cron.New()
 
 	for _, drive := range d.drives {
-		drive := drive
 		fullSync := false
 		l := d.withDriveLog(drive.ID)
 

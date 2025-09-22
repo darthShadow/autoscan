@@ -53,7 +53,7 @@ func TestHandler(t *testing.T) {
 		return currentTime
 	}
 
-	var testCases = []Test{
+	testCases := []Test{
 		{
 			"Multiple created and deleted",
 			Given{

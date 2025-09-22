@@ -12,7 +12,7 @@ func TestRewriter(t *testing.T) {
 		Expected string
 	}
 
-	var testCases = []Test{
+	testCases := []Test{
 		{
 			Name:     "One parameter with wildcard",
 			Input:    "/mnt/unionfs/Media/Movies/Example Movie/movie.mkv",
@@ -86,7 +86,6 @@ func TestRewriter(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
 			rewriter, err := NewRewriter(tc.Rewrites)
-
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,5 +96,4 @@ func TestRewriter(t *testing.T) {
 			}
 		})
 	}
-
 }

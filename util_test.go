@@ -13,7 +13,7 @@ func TestDSN(t *testing.T) {
 		Want  string
 	}
 
-	var testCases = []Test{
+	testCases := []Test{
 		{
 			Name: "readonly",
 			Path: "library.db",

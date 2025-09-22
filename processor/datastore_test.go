@@ -1,17 +1,16 @@
 package processor
 
 import (
-	"database/sql"
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/cloudbox/autoscan"
-	"github.com/cloudbox/autoscan/migrate"
-
-	// sqlite3 driver
-	_ "modernc.org/sqlite"
+	"github.com/cloudbox/autoscan/internal/sqlite"
 )
 
 const sqlGetScan = `
@@ -20,7 +19,7 @@ WHERE folder = ?
 `
 
 func (store *datastore) GetScan(folder string) (autoscan.Scan, error) {
-	row := store.QueryRow(sqlGetScan, folder)
+	row := store.db.RO().QueryRow(sqlGetScan, folder)
 
 	scan := autoscan.Scan{}
 	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time)
@@ -29,17 +28,30 @@ func (store *datastore) GetScan(folder string) (autoscan.Scan, error) {
 }
 
 func getDatastore(t *testing.T) *datastore {
-	db, err := sql.Open("sqlite", ":memory:")
+	// Create a temporary directory for the test database
+	tempDir, err := os.MkdirTemp("", "autoscan_test_")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	mg, err := migrate.New(db, "migrations")
+	// Clean up the temp directory when the test completes
+	t.Cleanup(func() {
+		os.RemoveAll(tempDir)
+	})
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	ctx := context.Background()
+	db, err := sqlite.NewDB(ctx, dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	ds, err := newDatastore(db, mg)
+	// Clean up the database connection when the test completes
+	t.Cleanup(func() {
+		db.Close()
+	})
+
+	ds, err := newDatastore(db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +66,7 @@ func TestUpsert(t *testing.T) {
 		WantScan autoscan.Scan
 	}
 
-	var testCases = []Test{
+	testCases := []Test{
 		{
 			Name: "All fields",
 			Scans: []autoscan.Scan{
@@ -114,6 +126,26 @@ func TestUpsert(t *testing.T) {
 	}
 }
 
+func TestUpsertEmptySlice(t *testing.T) {
+	store := getDatastore(t)
+
+	// Test that upserting an empty slice doesn't cause issues
+	err := store.Upsert([]autoscan.Scan{})
+	if err != nil {
+		t.Fatalf("Expected no error for empty slice, got: %v", err)
+	}
+
+	// Verify no scans were added
+	scans, err := store.GetAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(scans) != 0 {
+		t.Errorf("Expected 0 scans after empty upsert, got %d", len(scans))
+	}
+}
+
 func TestGetAvailableScan(t *testing.T) {
 	type Test struct {
 		Name      string
@@ -126,7 +158,7 @@ func TestGetAvailableScan(t *testing.T) {
 
 	testTime := time.Now().UTC()
 
-	var testCases = []Test{
+	testCases := []Test{
 		{
 			Name:   "Retrieves no folders if all folders are too young",
 			Now:    testTime,
@@ -201,7 +233,7 @@ func TestDelete(t *testing.T) {
 		WantScans  []autoscan.Scan
 	}
 
-	var testCases = []Test{
+	testCases := []Test{
 		{
 			Name: "Only deletes specific folder, not other folders",
 			GiveScans: []autoscan.Scan{

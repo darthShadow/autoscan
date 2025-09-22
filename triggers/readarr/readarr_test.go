@@ -43,7 +43,7 @@ func TestHandler(t *testing.T) {
 		return currentTime
 	}
 
-	var testCases = []Test{
+	testCases := []Test{
 		{
 			"Scan has all the correct fields",
 			Given{

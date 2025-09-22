@@ -31,13 +31,14 @@ func TestHandler(t *testing.T) {
 
 	standardConfig := Config{
 		Priority: 5,
-		Rewrite: []autoscan.Rewrite{{
-			From: "/Movies/*",
-			To:   "/mnt/unionfs/Media/Movies/$1",
-		}, {
-			From: "/TV/*",
-			To:   "/mnt/unionfs/Media/TV/$1",
-		},
+		Rewrite: []autoscan.Rewrite{
+			{
+				From: "/Movies/*",
+				To:   "/mnt/unionfs/Media/Movies/$1",
+			}, {
+				From: "/TV/*",
+				To:   "/mnt/unionfs/Media/TV/$1",
+			},
 		},
 	}
 
@@ -46,7 +47,7 @@ func TestHandler(t *testing.T) {
 		return currentTime
 	}
 
-	var testCases = []Test{
+	testCases := []Test{
 		{
 			"Returns bad request when no directories are given",
 			Given{

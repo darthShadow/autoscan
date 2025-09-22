@@ -8,28 +8,29 @@ import (
 	"time"
 
 	"github.com/cloudbox/autoscan"
+	"github.com/cloudbox/autoscan/internal/sqlite"
 	"github.com/cloudbox/autoscan/migrate"
-
-	// sqlite3 driver
-	_ "modernc.org/sqlite"
 )
 
 type datastore struct {
-	*sql.DB
+	db *sqlite.DB
 }
 
-var (
-	//go:embed migrations
-	migrations embed.FS
-)
+//go:embed migrations
+var migrations embed.FS
 
-func newDatastore(db *sql.DB, mg *migrate.Migrator) (*datastore, error) {
-	// migrations
+func newDatastore(db *sqlite.DB) (*datastore, error) {
+	// Run migrations using the RW connection
+	mg, err := migrate.New(db.RW(), "migrations")
+	if err != nil {
+		return nil, fmt.Errorf("create migrator: %w", err)
+	}
+
 	if err := mg.Migrate(&migrations, "processor"); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
-	return &datastore{db}, nil
+	return &datastore{db: db}, nil
 }
 
 const sqlUpsert = `
@@ -47,28 +48,40 @@ func (store *datastore) upsert(tx *sql.Tx, scan autoscan.Scan) error {
 }
 
 func (store *datastore) Upsert(scans []autoscan.Scan) error {
-	tx, err := store.Begin()
+	// Early return for empty slice - no need to create transaction
+	if len(scans) == 0 {
+		return nil
+	}
+
+	tx, err := store.db.RW().Begin()
 	if err != nil {
 		return err
 	}
 
+	// Ensure transaction is always cleaned up
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback()
+			panic(p) // re-throw panic after cleanup
+		} else if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
 	for _, scan := range scans {
 		if err = store.upsert(tx, scan); err != nil {
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				panic(rollbackErr)
-			}
-
-			return err
+			return err // defer will handle rollback
 		}
 	}
 
-	return tx.Commit()
+	err = tx.Commit()
+	return err
 }
 
 const sqlGetScansRemaining = `SELECT COUNT(folder) FROM scan`
 
 func (store *datastore) GetScansRemaining() (int, error) {
-	row := store.QueryRow(sqlGetScansRemaining)
+	row := store.db.RO().QueryRow(sqlGetScansRemaining)
 
 	remaining := 0
 	err := row.Scan(&remaining)
@@ -90,7 +103,7 @@ LIMIT 1
 `
 
 func (store *datastore) GetAvailableScan(minAge time.Duration) (autoscan.Scan, error) {
-	row := store.QueryRow(sqlGetAvailableScan, now().Add(-1*minAge))
+	row := store.db.RO().QueryRow(sqlGetAvailableScan, now().Add(-1*minAge))
 
 	scan := autoscan.Scan{}
 	err := row.Scan(&scan.Folder, &scan.RelativePath, &scan.Priority, &scan.Time)
@@ -108,20 +121,20 @@ const sqlGetAll = `
 SELECT folder, relative_path, priority, time FROM scan
 `
 
-func (store *datastore) GetAll() (scans []autoscan.Scan, err error) {
-	rows, err := store.Query(sqlGetAll)
+func (store *datastore) GetAll() ([]autoscan.Scan, error) {
+	rows, err := store.db.RO().Query(sqlGetAll)
 	if err != nil {
-		return scans, err
+		return nil, err
 	}
 	defer func() {
 		_ = rows.Close()
 	}()
 
+	var scans []autoscan.Scan
 	for rows.Next() {
 		scan := autoscan.Scan{}
-		err = rows.Scan(&scan.Folder, &scan.RelativePath, &scan.Priority, &scan.Time)
-		if err != nil {
-			return scans, err
+		if err := rows.Scan(&scan.Folder, &scan.RelativePath, &scan.Priority, &scan.Time); err != nil {
+			return nil, err
 		}
 
 		scans = append(scans, scan)
@@ -135,9 +148,9 @@ DELETE FROM scan WHERE folder=?
 `
 
 func (store *datastore) Delete(scan autoscan.Scan) error {
-	_, err := store.Exec(sqlDelete, scan.Folder)
+	_, err := store.db.RW().Exec(sqlDelete, scan.Folder)
 	if err != nil {
-		return fmt.Errorf("delete: %s: %w", err, autoscan.ErrFatal)
+		return fmt.Errorf("delete: %w", err)
 	}
 
 	return nil

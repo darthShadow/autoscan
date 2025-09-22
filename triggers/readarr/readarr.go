@@ -72,7 +72,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//Only handle test and download. Everything else is ignored.
+	// Only handle test and download. Everything else is ignored.
 	if !strings.EqualFold(event.Type, "Download") || len(event.Files) == 0 {
 		l.Error().Msg("Required fields are missing")
 		rw.WriteHeader(http.StatusBadRequest)

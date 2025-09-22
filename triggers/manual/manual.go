@@ -17,10 +17,8 @@ type Config struct {
 	Verbosity string             `yaml:"verbosity"`
 }
 
-var (
-	//go:embed "template.html"
-	template []byte
-)
+//go:embed "template.html"
+var template []byte
 
 // New creates an autoscan-compatible HTTP Trigger for manual webhooks.
 func New(c Config) (autoscan.HTTPTrigger, error) {

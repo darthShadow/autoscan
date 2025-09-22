@@ -1,7 +1,7 @@
 package main
 
 import (
-	"database/sql"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -18,7 +18,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/cloudbox/autoscan"
-	"github.com/cloudbox/autoscan/migrate"
+	"github.com/cloudbox/autoscan/internal/sqlite"
 	"github.com/cloudbox/autoscan/processor"
 	ast "github.com/cloudbox/autoscan/targets/autoscan"
 	"github.com/cloudbox/autoscan/targets/emby"
@@ -32,9 +32,6 @@ import (
 	"github.com/cloudbox/autoscan/triggers/radarr"
 	"github.com/cloudbox/autoscan/triggers/readarr"
 	"github.com/cloudbox/autoscan/triggers/sonarr"
-
-	// sqlite3 driver
-	_ "modernc.org/sqlite"
 )
 
 type config struct {
@@ -153,13 +150,13 @@ func main() {
 	}
 
 	// datastore
-	db, err := sql.Open("sqlite", cli.Database)
+	dbCtx := context.Background()
+	db, err := sqlite.NewDB(dbCtx, cli.Database)
 	if err != nil {
 		log.Fatal().
 			Err(err).
 			Msg("Failed opening datastore")
 	}
-	db.SetMaxOpenConns(1)
 
 	// config
 	file, err := os.Open(cli.Config)
@@ -190,22 +187,12 @@ func main() {
 			Msg("Failed decoding config")
 	}
 
-	// migrator
-	mg, err := migrate.New(db, "migrations")
-	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Failed initialising migrator")
-	}
-
 	// processor
 	proc, err := processor.New(processor.Config{
 		Anchors:    c.Anchors,
 		MinimumAge: c.MinimumAge,
 		Db:         db,
-		Mg:         mg,
 	})
-
 	if err != nil {
 		log.Fatal().
 			Err(err).
@@ -224,7 +211,7 @@ func main() {
 
 	// daemon triggers
 	for _, t := range c.Triggers.Bernard {
-		trigger, err := bernard.New(t, db)
+		trigger, err := bernard.New(t, db.RW())
 		if err != nil {
 			log.Fatal().
 				Err(err).
