@@ -92,7 +92,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		scans = append(scans, autoscan.Scan{
 			Folder:   folderPath,
 			Priority: h.priority,
-			Time:     now(),
+			Time:     now().Unix(),
 		})
 	}
 

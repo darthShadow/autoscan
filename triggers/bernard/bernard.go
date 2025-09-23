@@ -336,7 +336,7 @@ func (d daemon) getScanTask(drive *drive, paths *Paths) *scanTask {
 		task.scans = append(task.scans, autoscan.Scan{
 			Folder:   filepath.Clean(rewritten),
 			Priority: d.priority,
-			Time:     drive.ScanTime(),
+			Time:     drive.ScanTime().Unix(),
 		})
 
 		task.added++
@@ -363,7 +363,7 @@ func (d daemon) getScanTask(drive *drive, paths *Paths) *scanTask {
 		task.scans = append(task.scans, autoscan.Scan{
 			Folder:   filepath.Clean(rewritten),
 			Priority: d.priority,
-			Time:     drive.ScanTime(),
+			Time:     drive.ScanTime().Unix(),
 		})
 
 		task.removed++

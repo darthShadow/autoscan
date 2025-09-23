@@ -150,7 +150,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 			Folder:       folderPath,
 			RelativePath: filePath,
 			Priority:     h.priority,
-			Time:         now(),
+			Time:         now().Unix(),
 		}
 
 		scans = append(scans, scan)

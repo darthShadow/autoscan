@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
-	"time"
 )
 
 // A Scan is at the core of Autoscan.
@@ -16,7 +15,7 @@ type Scan struct {
 	Folder       string
 	RelativePath string
 	Priority     int
-	Time         time.Time
+	Time         int64 // Unix timestamp
 }
 
 type ProcessorFunc func(...Scan) error

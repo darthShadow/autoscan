@@ -55,7 +55,7 @@ func TestHandler(t *testing.T) {
 				Scans: []autoscan.Scan{{
 					Folder:   "/mnt/unionfs/Media/Music/Marshmello/Joytime III (2019)",
 					Priority: 5,
-					Time:     currentTime,
+					Time:     currentTime.Unix(),
 				}},
 			},
 		},
@@ -71,12 +71,12 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/Music/blink‐182/California (2016)/CD 01",
 						Priority: 5,
-						Time:     currentTime,
+						Time:     currentTime.Unix(),
 					},
 					{
 						Folder:   "/mnt/unionfs/Media/Music/blink‐182/California (2016)/CD 02",
 						Priority: 5,
-						Time:     currentTime,
+						Time:     currentTime.Unix(),
 					},
 				},
 			},

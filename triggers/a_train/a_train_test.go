@@ -67,22 +67,22 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Interstellar (2014)",
 						Priority: 5,
-						Time:     currentTime,
+						Time:     currentTime.Unix(),
 					},
 					{
 						Folder:   "/mnt/unionfs/Media/TV/Legion/Season 1",
 						Priority: 5,
-						Time:     currentTime,
+						Time:     currentTime.Unix(),
 					},
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Wonder Woman 1984 (2020)",
 						Priority: 5,
-						Time:     currentTime,
+						Time:     currentTime.Unix(),
 					},
 					{
 						Folder:   "/mnt/unionfs/Media/Movies/Mortal Kombat (2021)",
 						Priority: 5,
-						Time:     currentTime,
+						Time:     currentTime.Unix(),
 					},
 				},
 			},
@@ -100,12 +100,12 @@ func TestHandler(t *testing.T) {
 					{
 						Folder:   "/TV/Legion/Season 1",
 						Priority: 5,
-						Time:     currentTime,
+						Time:     currentTime.Unix(),
 					},
 					{
 						Folder:   "/TV/Legion/Season 1",
 						Priority: 5,
-						Time:     currentTime,
+						Time:     currentTime.Unix(),
 					},
 				},
 			},

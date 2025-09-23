@@ -73,13 +73,13 @@ func TestUpsert(t *testing.T) {
 				{
 					Folder:   "testfolder/test",
 					Priority: 5,
-					Time:     time.Time{}.Add(1),
+					Time:     time.Time{}.Add(1).Unix(),
 				},
 			},
 			WantScan: autoscan.Scan{
 				Folder:   "testfolder/test",
 				Priority: 5,
-				Time:     time.Time{}.Add(1),
+				Time:     time.Time{}.Add(1).Unix(),
 			},
 		},
 		{
@@ -87,20 +87,20 @@ func TestUpsert(t *testing.T) {
 			Scans: []autoscan.Scan{
 				{
 					Priority: 2,
-					Time:     time.Time{}.Add(1),
+					Time:     time.Time{}.Add(1).Unix(),
 				},
 				{
 					Priority: 5,
-					Time:     time.Time{}.Add(2),
+					Time:     time.Time{}.Add(2).Unix(),
 				},
 				{
 					Priority: 3,
-					Time:     time.Time{}.Add(3),
+					Time:     time.Time{}.Add(3).Unix(),
 				},
 			},
 			WantScan: autoscan.Scan{
 				Priority: 5,
-				Time:     time.Time{}.Add(3),
+				Time:     time.Time{}.Add(3).Unix(),
 			},
 		},
 	}
@@ -164,8 +164,8 @@ func TestGetAvailableScan(t *testing.T) {
 			Now:    testTime,
 			MinAge: 2 * time.Minute,
 			GiveScans: []autoscan.Scan{
-				{Folder: "1", Time: testTime.Add(-1 * time.Minute)},
-				{Folder: "2", Time: testTime.Add(-1 * time.Minute)},
+				{Folder: "1", Time: testTime.Add(-1 * time.Minute).Unix()},
+				{Folder: "2", Time: testTime.Add(-1 * time.Minute).Unix()},
 			},
 			WantErr: autoscan.ErrNoScans,
 		},
@@ -174,10 +174,10 @@ func TestGetAvailableScan(t *testing.T) {
 			Now:    testTime,
 			MinAge: 5 * time.Minute,
 			GiveScans: []autoscan.Scan{
-				{Folder: "1", Time: testTime.Add(-6 * time.Minute)},
+				{Folder: "1", Time: testTime.Add(-6 * time.Minute).Unix()},
 			},
 			WantScan: autoscan.Scan{
-				Folder: "1", Time: testTime.Add(-6 * time.Minute),
+				Folder: "1", Time: testTime.Add(-6 * time.Minute).Unix(),
 			},
 		},
 		{
@@ -188,13 +188,13 @@ func TestGetAvailableScan(t *testing.T) {
 				{
 					Folder:   "Amazing folder",
 					Priority: 69,
-					Time:     testTime.Add(-6 * time.Minute),
+					Time:     testTime.Add(-6 * time.Minute).Unix(),
 				},
 			},
 			WantScan: autoscan.Scan{
 				Folder:   "Amazing folder",
 				Priority: 69,
-				Time:     testTime.Add(-6 * time.Minute),
+				Time:     testTime.Add(-6 * time.Minute).Unix(),
 			},
 		},
 	}
@@ -219,6 +219,89 @@ func TestGetAvailableScan(t *testing.T) {
 			if !reflect.DeepEqual(scan, tc.WantScan) {
 				t.Log(scan)
 				t.Log(tc.WantScan)
+				t.Errorf("Scan does not match")
+			}
+		})
+	}
+}
+
+func TestGetAvailableScanEdgeCases(t *testing.T) {
+	type Test struct {
+		Name      string
+		Now       time.Time
+		MinAge    time.Duration
+		GiveScans []autoscan.Scan
+		WantErr   error
+		WantScan  autoscan.Scan
+	}
+
+	testTime := time.Now().UTC()
+
+	testCases := []Test{
+		{
+			Name:   "Zero timestamp (Unix epoch) is immediately available",
+			Now:    testTime,
+			MinAge: 1 * time.Hour,
+			GiveScans: []autoscan.Scan{
+				{Folder: "epoch", Time: 0}, // January 1, 1970
+			},
+			WantScan: autoscan.Scan{
+				Folder: "epoch", Time: 0,
+			},
+		},
+		{
+			Name:   "Future timestamp is not available",
+			Now:    testTime,
+			MinAge: 1 * time.Minute,
+			GiveScans: []autoscan.Scan{
+				{Folder: "future", Time: testTime.Add(1 * time.Hour).Unix()},
+			},
+			WantErr: autoscan.ErrNoScans,
+		},
+		{
+			Name:   "Very old timestamp is immediately available",
+			Now:    testTime,
+			MinAge: 1 * time.Minute,
+			GiveScans: []autoscan.Scan{
+				{Folder: "old", Time: time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC).Unix()},
+			},
+			WantScan: autoscan.Scan{
+				Folder: "old", Time: time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
+			},
+		},
+		{
+			Name:   "Large timestamp (year 2050) works correctly",
+			Now:    time.Date(2051, 1, 1, 0, 0, 0, 0, time.UTC),
+			MinAge: 1 * time.Hour,
+			GiveScans: []autoscan.Scan{
+				{Folder: "far-future", Time: time.Date(2050, 1, 1, 0, 0, 0, 0, time.UTC).Unix()},
+			},
+			WantScan: autoscan.Scan{
+				Folder: "far-future", Time: time.Date(2050, 1, 1, 0, 0, 0, 0, time.UTC).Unix(),
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			store := getDatastore(t)
+			err := store.Upsert(tc.GiveScans)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			now = func() time.Time {
+				return tc.Now
+			}
+
+			scan, err := store.GetAvailableScan(tc.MinAge)
+			if !errors.Is(err, tc.WantErr) {
+				t.Fatalf("Expected error %v, got %v", tc.WantErr, err)
+			}
+
+			if !reflect.DeepEqual(scan, tc.WantScan) {
+				t.Log("Got:", scan)
+				t.Log("Want:", tc.WantScan)
 				t.Errorf("Scan does not match")
 			}
 		})

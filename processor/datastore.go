@@ -103,7 +103,8 @@ LIMIT 1
 `
 
 func (store *datastore) GetAvailableScan(minAge time.Duration) (autoscan.Scan, error) {
-	row := store.db.RO().QueryRow(sqlGetAvailableScan, now().Add(-1*minAge))
+	cutoff := now().Add(-1 * minAge).Unix()
+	row := store.db.RO().QueryRow(sqlGetAvailableScan, cutoff)
 
 	scan := autoscan.Scan{}
 	err := row.Scan(&scan.Folder, &scan.RelativePath, &scan.Priority, &scan.Time)

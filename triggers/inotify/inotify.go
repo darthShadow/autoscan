@@ -294,7 +294,7 @@ func (q *queue) process() {
 		err := q.callback(autoscan.Scan{
 			Folder:   filepath.Clean(p),
 			Priority: q.priority,
-			Time:     time.Now(),
+			Time:     time.Now().Unix(),
 		})
 
 		if err != nil {

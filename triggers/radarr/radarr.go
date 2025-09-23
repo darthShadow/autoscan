@@ -105,7 +105,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		Folder:       h.rewrite(folderPath),
 		RelativePath: filePath,
 		Priority:     h.priority,
-		Time:         now(),
+		Time:         now().Unix(),
 	}
 
 	err = h.callback(scan)

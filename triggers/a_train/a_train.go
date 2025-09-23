@@ -95,7 +95,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		scans = append(scans, autoscan.Scan{
 			Folder:   h.rewrite(drive, path),
 			Priority: h.priority,
-			Time:     now(),
+			Time:     now().Unix(),
 		})
 	}
 
@@ -103,7 +103,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		scans = append(scans, autoscan.Scan{
 			Folder:   h.rewrite(drive, path),
 			Priority: h.priority,
-			Time:     now(),
+			Time:     now().Unix(),
 		})
 	}
 
