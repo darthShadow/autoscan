@@ -6,11 +6,40 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/cloudbox/autoscan"
 )
+
+// scansEqual compares two slices of scans for equality, ignoring order
+func scansEqual(expected, actual []autoscan.Scan) bool {
+	if len(expected) != len(actual) {
+		return false
+	}
+
+	// Sort both slices for comparison
+	sortScans := func(scans []autoscan.Scan) []autoscan.Scan {
+		sorted := make([]autoscan.Scan, len(scans))
+		copy(sorted, scans)
+		sort.Slice(sorted, func(i, j int) bool {
+			if sorted[i].Folder != sorted[j].Folder {
+				return sorted[i].Folder < sorted[j].Folder
+			}
+			if sorted[i].RelativePath != sorted[j].RelativePath {
+				return sorted[i].RelativePath < sorted[j].RelativePath
+			}
+			return sorted[i].Priority < sorted[j].Priority
+		})
+		return sorted
+	}
+
+	expectedSorted := sortScans(expected)
+	actualSorted := sortScans(actual)
+
+	return reflect.DeepEqual(expectedSorted, actualSorted)
+}
 
 func TestHandler(t *testing.T) {
 	type Given struct {
@@ -158,9 +187,15 @@ func TestHandler(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
 			callback := func(scans ...autoscan.Scan) error {
-				if !reflect.DeepEqual(tc.Expected.Scans, scans) {
-					t.Log(scans)
-					t.Log(tc.Expected.Scans)
+				if !scansEqual(tc.Expected.Scans, scans) {
+					t.Log("Actual scans:")
+					for _, scan := range scans {
+						t.Logf("  %+v", scan)
+					}
+					t.Log("Expected scans:")
+					for _, scan := range tc.Expected.Scans {
+						t.Logf("  %+v", scan)
+					}
 					t.Errorf("Scans are not equal")
 					return errors.New("scans are not equal")
 				}

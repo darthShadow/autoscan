@@ -53,12 +53,12 @@ tasks:
   release:
     desc: Generate a release, but don't publish
     cmds:
-      - goreleaser --skip-validate --skip-publish --clean
+      - goreleaser --skip=validate,publish --clean
 
   snapshot:
     desc: Generate a snapshot release
     cmds:
-      - goreleaser --snapshot --skip-publish --clean
+      - goreleaser --snapshot --skip=publish --clean
 
   publish:
     desc: Generate a release, and publish
