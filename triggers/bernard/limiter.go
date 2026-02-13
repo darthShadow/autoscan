@@ -17,17 +17,16 @@ const (
 )
 
 type rateLimiter struct {
-	ctx context.Context
 	rl  *rate.Limiter
 	sem *semaphore.Weighted
 }
 
-func (r *rateLimiter) Wait() {
-	_ = r.rl.Wait(r.ctx)
+func (r *rateLimiter) Wait(ctx context.Context) {
+	_ = r.rl.Wait(ctx)
 }
 
-func (r *rateLimiter) Acquire(n int64) error {
-	return r.sem.Acquire(r.ctx, n)
+func (r *rateLimiter) Acquire(ctx context.Context, n int64) error {
+	return r.sem.Acquire(ctx, n)
 }
 
 func (r *rateLimiter) Release(n int64) {
@@ -36,7 +35,6 @@ func (r *rateLimiter) Release(n int64) {
 
 func newRateLimiter() *rateLimiter {
 	return &rateLimiter{
-		ctx: context.Background(),
 		rl:  rate.NewLimiter(rate.Every(time.Second/time.Duration(requestLimit)), requestLimit),
 		sem: semaphore.NewWeighted(int64(syncLimit)),
 	}

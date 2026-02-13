@@ -1,6 +1,7 @@
 package bernard
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -18,7 +19,8 @@ import (
 )
 
 const (
-	maxSyncRetries = 5
+	maxSyncRetries      = 5
+	syncWatchdogTimeout = 30 * time.Minute
 )
 
 type Config struct {
@@ -61,7 +63,7 @@ func New(c Config, db *sql.DB) (autoscan.Trigger, error) {
 	}
 
 	bernard := lowe.New(auth, store,
-		lowe.WithPreRequestHook(limiter.Wait),
+		lowe.WithPreRequestHook(func() { limiter.Wait(context.Background()) }),
 		lowe.WithSafeSleep(120*time.Second))
 
 	var drives []drive
@@ -206,6 +208,23 @@ func newSyncJob(c *cron.Cron, log zerolog.Logger, job func() error) *syncJob {
 	}
 }
 
+// runSyncWithWatchdog runs syncFn and logs a warning if it exceeds the watchdog timeout.
+// It always blocks until syncFn completes — never orphans the goroutine.
+func (d daemon) runSyncWithWatchdog(driveID string, syncFn func() error) error {
+	done := make(chan error, 1)
+	go func() { done <- syncFn() }()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(syncWatchdogTimeout):
+		d.log.Warn().Str("drive_id", driveID).
+			Dur("elapsed", syncWatchdogTimeout).
+			Msg("Sync exceeded expected duration, still waiting for completion...")
+		return <-done
+	}
+}
+
 func (d daemon) startAutoSync() error {
 	c := cron.New()
 
@@ -226,7 +245,7 @@ func (d daemon) startAutoSync() error {
 		// create job
 		job := newSyncJob(c, l, func() error {
 			// acquire lock
-			if err := d.limiter.Acquire(1); err != nil {
+			if err := d.limiter.Acquire(context.Background(), 1); err != nil {
 				return fmt.Errorf("%v: acquiring sync semaphore: %v: %w",
 					drive.ID, err, autoscan.ErrFatal)
 			}
@@ -234,16 +253,18 @@ func (d daemon) startAutoSync() error {
 
 			// full sync
 			if fullSync {
-				l.Info().Msg("Starting full sync")
-				start := time.Now()
+				return d.runSyncWithWatchdog(drive.ID, func() error {
+					l.Info().Msg("Starting full sync")
+					start := time.Now()
 
-				if err := d.bernard.FullSync(drive.ID); err != nil {
-					return fmt.Errorf("%v: performing full sync: %w", drive.ID, err)
-				}
+					if err := d.bernard.FullSync(drive.ID); err != nil {
+						return fmt.Errorf("%v: performing full sync: %w", drive.ID, err)
+					}
 
-				l.Info().Msgf("Finished full sync in %s", time.Since(start))
-				fullSync = false
-				return nil
+					l.Info().Msgf("Finished full sync in %s", time.Since(start))
+					fullSync = false
+					return nil
+				})
 			}
 
 			// create partial sync
@@ -251,42 +272,44 @@ func (d daemon) startAutoSync() error {
 			ph := NewPostProcessBernardDiff(drive.ID, d.store, diff)
 			ch, paths := NewPathsHook(drive.ID, d.store, diff)
 
-			l.Trace().Msg("Running partial sync")
-			start := time.Now()
+			return d.runSyncWithWatchdog(drive.ID, func() error {
+				l.Trace().Msg("Running partial sync")
+				start := time.Now()
 
-			// do partial sync
-			err := d.bernard.PartialSync(drive.ID, dh, ph, ch)
-			if err != nil {
-				return fmt.Errorf("%v: performing partial sync: %w", drive.ID, err)
-			}
-
-			l.Trace().
-				Int("new", len(paths.NewFolders)).
-				Int("old", len(paths.OldFolders)).
-				Msgf("Partial sync finished in %s", time.Since(start))
-
-			// translate paths to scan task
-			task := d.getScanTask(&(drive), paths)
-
-			// move scans to processor
-			if len(task.scans) > 0 {
-				l.Trace().
-					Interface("scans", task.scans).
-					Msg("Scans moving to processor")
-
-				err := d.callback(task.scans...)
+				// do partial sync
+				err := d.bernard.PartialSync(drive.ID, dh, ph, ch)
 				if err != nil {
-					return fmt.Errorf("%v: moving scans to processor: %v: %w",
-						drive.ID, err, autoscan.ErrFatal)
+					return fmt.Errorf("%v: performing partial sync: %w", drive.ID, err)
 				}
 
-				l.Info().
-					Int("added", task.added).
-					Int("removed", task.removed).
-					Msg("Scan moved to processor")
-			}
+				l.Trace().
+					Int("new", len(paths.NewFolders)).
+					Int("old", len(paths.OldFolders)).
+					Msgf("Partial sync finished in %s", time.Since(start))
 
-			return nil
+				// translate paths to scan task
+				task := d.getScanTask(&(drive), paths)
+
+				// move scans to processor
+				if len(task.scans) > 0 {
+					l.Trace().
+						Interface("scans", task.scans).
+						Msg("Scans moving to processor")
+
+					err := d.callback(task.scans...)
+					if err != nil {
+						return fmt.Errorf("%v: moving scans to processor: %v: %w",
+							drive.ID, err, autoscan.ErrFatal)
+					}
+
+					l.Info().
+						Int("added", task.added).
+						Int("removed", task.removed).
+						Msg("Scan moved to processor")
+				}
+
+				return nil
+			})
 		})
 
 		id, err := c.AddJob(d.cronSchedule, cron.NewChain(cron.SkipIfStillRunning(cron.DiscardLogger)).Then(job))

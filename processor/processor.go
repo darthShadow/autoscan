@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -58,10 +59,15 @@ func (p *Processor) ScansProcessed() int64 {
 	return atomic.LoadInt64(&p.processed)
 }
 
+const processorTimeout = 90 * time.Second
+
 // CheckAvailability checks whether all targets are available.
 // If one target is not available, the error will return.
 func (p *Processor) CheckAvailability(targets []autoscan.Target) error {
-	g := new(errgroup.Group)
+	ctx, cancel := context.WithTimeout(context.Background(), processorTimeout)
+	defer cancel()
+
+	g, _ := errgroup.WithContext(ctx)
 
 	for _, target := range targets {
 		g.Go(func() error {
@@ -73,7 +79,10 @@ func (p *Processor) CheckAvailability(targets []autoscan.Target) error {
 }
 
 func (p *Processor) callTargets(targets []autoscan.Target, scan autoscan.Scan) error {
-	g := new(errgroup.Group)
+	ctx, cancel := context.WithTimeout(context.Background(), processorTimeout)
+	defer cancel()
+
+	g, _ := errgroup.WithContext(ctx)
 
 	for _, target := range targets {
 		g.Go(func() error {

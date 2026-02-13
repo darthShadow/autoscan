@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -336,6 +338,16 @@ func main() {
 		Str("version", fmt.Sprintf("%s (%s@%s)", Version, GitCommit, Timestamp)).
 		Msg("Initialised")
 
+	// signal handler
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		log.Info().Str("signal", sig.String()).Msg("Received signal, shutting down...")
+		_ = proc.Close()
+		os.Exit(0)
+	}()
+
 	// processor
 	log.Info().Msg("Processor started")
 
@@ -386,7 +398,7 @@ func main() {
 			time.Sleep(15 * time.Second)
 
 		case errors.Is(err, autoscan.ErrFatal):
-			log.Error().Err(err).Msg("Fatal error occurred while processing targets, exiting...")
+			log.Fatal().Err(err).Msg("Fatal error occurred while processing targets, exiting...")
 
 		default:
 			// unexpected error

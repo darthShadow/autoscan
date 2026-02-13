@@ -1,8 +1,31 @@
 package autoscan
 
 import (
+	"bytes"
+	"io"
+	"strings"
 	"testing"
 )
+
+func TestLimitReadCloserTruncates(t *testing.T) {
+	overSize := maxResponseBodySize + 1024
+	body := strings.Repeat("x", int(overSize))
+	rc := io.NopCloser(bytes.NewBufferString(body))
+	limited := LimitReadCloser(rc)
+
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if int64(len(data)) != maxResponseBodySize {
+		t.Errorf("got %d bytes, want %d", len(data), maxResponseBodySize)
+	}
+
+	if err := limited.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+}
 
 func TestRewriter(t *testing.T) {
 	type Test struct {

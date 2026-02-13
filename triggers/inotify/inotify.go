@@ -254,61 +254,67 @@ func (q *queue) add(path string) {
 }
 
 func (q *queue) worker() {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case path, ok := <-q.inputs:
 			if !ok {
-				// channel closed
 				return
 			}
-
-			// add path to queue
 			q.add(path)
-
-		default:
-			// process queue
+		case <-ticker.C:
 			q.process()
 		}
 	}
 }
 
 func (q *queue) process() {
-	// acquire lock
 	q.lock.Lock()
-	defer q.lock.Unlock()
 
-	// sleep if no scans queued
 	if len(q.scans) == 0 {
-		time.Sleep(100 * time.Millisecond)
+		q.lock.Unlock()
 		return
 	}
 
-	// move scans to processor
+	// collect ready scans under lock
+	type readyScan struct {
+		path string
+		scan autoscan.Scan
+	}
+
+	var ready []readyScan
+	now := time.Now()
 	for p, t := range q.scans {
-		// time has not elapsed
-		if time.Now().Before(t) {
+		if now.Before(t) {
 			continue
 		}
-
-		// move to processor
-		err := q.callback(autoscan.Scan{
-			Folder:   filepath.Clean(p),
-			Priority: q.priority,
-			Time:     time.Now().Unix(),
+		ready = append(ready, readyScan{
+			path: p,
+			scan: autoscan.Scan{
+				Folder:   filepath.Clean(p),
+				Priority: q.priority,
+				Time:     now.Unix(),
+			},
 		})
+		delete(q.scans, p)
+	}
 
+	q.lock.Unlock()
+
+	// call callbacks outside lock
+	for _, r := range ready {
+		err := q.callback(r.scan)
 		if err != nil {
 			q.log.Error().
 				Err(err).
-				Str("path", p).
+				Str("path", r.path).
 				Msg("Failed moving scan to processor")
 		} else {
 			q.log.Info().
-				Str("path", p).
+				Str("path", r.path).
 				Msg("Scan moved to processor")
 		}
-
-		// remove queued scan
-		delete(q.scans, p)
 	}
 }

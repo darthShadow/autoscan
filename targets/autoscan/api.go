@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/cloudbox/autoscan"
+	"github.com/cloudbox/autoscan/internal/httpclient"
 )
 
 type apiClient struct {
@@ -20,7 +21,7 @@ type apiClient struct {
 
 func newAPIClient(baseURL string, user string, pass string, log zerolog.Logger) apiClient {
 	return apiClient{
-		client:  &http.Client{},
+		client:  httpclient.New(),
 		log:     log,
 		baseURL: baseURL,
 		user:    user,
@@ -35,6 +36,7 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 	}
 
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
+		res.Body = autoscan.LimitReadCloser(res.Body)
 		return res, nil
 	}
 

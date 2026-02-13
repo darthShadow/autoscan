@@ -3,6 +3,7 @@ package autoscan
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 )
@@ -33,6 +34,23 @@ type HTTPTrigger func(ProcessorFunc) http.Handler
 type Target interface {
 	Scan(Scan) error
 	Available() error
+}
+
+const maxResponseBodySize = 10 * 1024 * 1024 // 10MB
+
+// limitedReadCloser wraps an io.LimitedReader with the original closer.
+type limitedReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
+// LimitReadCloser wraps rc so that at most maxResponseBodySize bytes are read.
+// The underlying body is still closed normally.
+func LimitReadCloser(rc io.ReadCloser) io.ReadCloser {
+	return &limitedReadCloser{
+		Reader: io.LimitReader(rc, maxResponseBodySize),
+		Closer: rc,
+	}
 }
 
 var (
