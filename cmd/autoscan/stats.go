@@ -11,30 +11,27 @@ import (
 )
 
 func scanStats(proc *processor.Processor, interval time.Duration) {
-	st := time.NewTicker(interval)
-	for {
-		select {
-		case _ = <-st.C:
-			// retrieve amount of scans remaining
-			sm, err := proc.ScansRemaining()
-			switch {
-			case err == nil:
-				log.Info().
-					Int("remaining", sm).
-					Int64("processed", proc.ScansProcessed()).
-					Msg("Scan Stats")
-			case errors.Is(err, autoscan.ErrFatal):
-				log.Error().
-					Err(err).
-					Msg("Stats Stopped")
-				st.Stop()
-				return
-			default:
-				// ErrNoScans should never occur as COUNT should always at-least return 0
-				log.Error().
-					Err(err).
-					Msg("Scan Stats Failed")
-			}
+	ticker := time.NewTicker(interval)
+	for range ticker.C {
+		// retrieve amount of scans remaining
+		sm, err := proc.ScansRemaining()
+		switch {
+		case err == nil:
+			log.Info().
+				Int("remaining", sm).
+				Int64("processed", proc.ScansProcessed()).
+				Msg("Scan Stats")
+		case errors.Is(err, autoscan.ErrFatal):
+			log.Error().
+				Err(err).
+				Msg("Stats Stopped")
+			ticker.Stop()
+			return
+		default:
+			// ErrNoScans should never occur as COUNT should always at-least return 0
+			log.Error().
+				Err(err).
+				Msg("Scan Stats Failed")
 		}
 	}
 }

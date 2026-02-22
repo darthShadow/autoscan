@@ -10,6 +10,7 @@ import (
 	"github.com/cloudbox/autoscan"
 )
 
+// Config holds configuration for the Plex target.
 type Config struct {
 	URL       string             `yaml:"url"`
 	Token     string             `yaml:"token"`
@@ -27,24 +28,25 @@ type target struct {
 	api     *apiClient
 }
 
-func New(c Config) (autoscan.Target, error) {
-	l := autoscan.GetLogger(c.Verbosity).With().
+// New creates a Plex target from the given Config.
+func New(cfg Config) (autoscan.Target, error) {
+	logger := autoscan.GetLogger(cfg.Verbosity).With().
 		Str("target", "plex").
-		Str("url", c.URL).Logger()
+		Str("url", cfg.URL).Logger()
 
-	rewriter, err := autoscan.NewRewriter(c.Rewrite)
+	rewriter, err := autoscan.NewRewriter(cfg.Rewrite)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create rewriter: %w", err)
 	}
 
-	api := newAPIClient(c.URL, c.Token, l)
+	api := newAPIClient(cfg.URL, cfg.Token, logger)
 
 	version, err := api.Version()
 	if err != nil {
 		return nil, err
 	}
 
-	l.Debug().Str("version", version).Msg("Plex Version")
+	logger.Debug().Str("version", version).Msg("Plex Version")
 	if !isSupportedVersion(version) {
 		return nil, fmt.Errorf("plex running unsupported version %s: %w", version, autoscan.ErrFatal)
 	}
@@ -54,16 +56,16 @@ func New(c Config) (autoscan.Target, error) {
 		return nil, err
 	}
 
-	l.Debug().
+	logger.Debug().
 		Interface("libraries", libraries).
 		Msg("Libraries Retrieved")
 
 	return &target{
-		url:       c.URL,
-		token:     c.Token,
+		url:       cfg.URL,
+		token:     cfg.Token,
 		libraries: libraries,
 
-		log:     l,
+		log:     logger,
 		rewrite: rewriter,
 		api:     api,
 	}, nil
@@ -89,18 +91,18 @@ func (t target) Scan(scan autoscan.Scan) error {
 
 	// send scan request
 	for _, lib := range libs {
-		l := t.log.With().
+		logger := t.log.With().
 			Str("path", scanFolder).
 			Str("library", lib.Name).
 			Logger()
 
-		l.Debug().Msg("Scan Sending")
+		logger.Debug().Msg("Scan Sending")
 
 		if err := t.api.Scan(scanFolder, lib.ID); err != nil {
 			return err
 		}
 
-		l.Info().Msg("Scan Sent")
+		logger.Info().Msg("Scan Sent")
 	}
 
 	return nil

@@ -2,20 +2,13 @@ package sqlite
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 )
 
 func TestSQLiteIntegration(t *testing.T) {
 	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "sqlite_integration_test_")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	t.Cleanup(func() {
-		os.RemoveAll(tempDir)
-	})
+	tempDir := t.TempDir()
 
 	// Create database
 	dbPath := filepath.Join(tempDir, "test_integration.db")
@@ -27,7 +20,7 @@ func TestSQLiteIntegration(t *testing.T) {
 		t.Fatalf("Failed to create database: %v", err)
 	}
 	t.Cleanup(func() {
-		db.Close()
+		_ = db.Close()
 	})
 
 	// Test basic functionality
@@ -55,7 +48,7 @@ func TestSQLiteIntegration(t *testing.T) {
 	}
 
 	// Test ping
-	if err := db.Ping(); err != nil {
+	if err := db.PingContext(context.Background()); err != nil {
 		t.Fatalf("Failed to ping database: %v", err)
 	}
 

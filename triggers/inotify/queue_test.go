@@ -91,4 +91,3 @@ func TestQueueWorkerExitsOnChannelClose(t *testing.T) {
 		t.Fatal("worker did not exit after channel close")
 	}
 }
-

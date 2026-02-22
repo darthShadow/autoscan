@@ -28,7 +28,7 @@ import (
 	"github.com/cloudbox/autoscan/targets/emby"
 	"github.com/cloudbox/autoscan/targets/jellyfin"
 	"github.com/cloudbox/autoscan/targets/plex"
-	"github.com/cloudbox/autoscan/triggers/a_train"
+	atrain "github.com/cloudbox/autoscan/triggers/a_train"
 	"github.com/cloudbox/autoscan/triggers/bernard"
 	"github.com/cloudbox/autoscan/triggers/inotify"
 	"github.com/cloudbox/autoscan/triggers/lidarr"
@@ -37,6 +37,42 @@ import (
 	"github.com/cloudbox/autoscan/triggers/readarr"
 	"github.com/cloudbox/autoscan/triggers/sonarr"
 )
+
+const (
+	logMaxSizeMB  = 5
+	logMaxAgeDays = 14
+	logMaxBackups = 5
+
+	defaultScanDelay = 5 * time.Second
+	defaultPort      = 3030
+
+	serverTimeout = 30 * time.Second
+
+	noScansDelay = 15 * time.Second
+)
+
+type authConfig struct {
+	Username string `yaml:"username"`
+	Password string `yaml:"password"` //nolint:gosec // user-provided credential field
+}
+
+type triggersConfig struct {
+	Manual  manual.Config    `yaml:"manual"`
+	ATrain  atrain.Config    `yaml:"a-train"`
+	Bernard []bernard.Config `yaml:"bernard"`
+	Inotify []inotify.Config `yaml:"inotify"`
+	Lidarr  []lidarr.Config  `yaml:"lidarr"`
+	Radarr  []radarr.Config  `yaml:"radarr"`
+	Readarr []readarr.Config `yaml:"readarr"`
+	Sonarr  []sonarr.Config  `yaml:"sonarr"`
+}
+
+type targetsConfig struct {
+	Autoscan []ast.Config      `yaml:"autoscan"`
+	Emby     []emby.Config     `yaml:"emby"`
+	Jellyfin []jellyfin.Config `yaml:"jellyfin"`
+	Plex     []plex.Config     `yaml:"plex"`
+}
 
 type config struct {
 	// General configuration
@@ -48,30 +84,13 @@ type config struct {
 	Anchors    []string      `yaml:"anchors"`
 
 	// Authentication for autoscan.HTTPTrigger
-	Auth struct {
-		Username string `yaml:"username"`
-		Password string `yaml:"password"`
-	} `yaml:"authentication"`
+	Auth authConfig `yaml:"authentication"`
 
 	// autoscan.HTTPTrigger
-	Triggers struct {
-		Manual  manual.Config    `yaml:"manual"`
-		ATrain  a_train.Config   `yaml:"a-train"`
-		Bernard []bernard.Config `yaml:"bernard"`
-		Inotify []inotify.Config `yaml:"inotify"`
-		Lidarr  []lidarr.Config  `yaml:"lidarr"`
-		Radarr  []radarr.Config  `yaml:"radarr"`
-		Readarr []readarr.Config `yaml:"readarr"`
-		Sonarr  []sonarr.Config  `yaml:"sonarr"`
-	} `yaml:"triggers"`
+	Triggers triggersConfig `yaml:"triggers"`
 
 	// autoscan.Target
-	Targets struct {
-		Autoscan []ast.Config      `yaml:"autoscan"`
-		Emby     []emby.Config     `yaml:"emby"`
-		Jellyfin []jellyfin.Config `yaml:"jellyfin"`
-		Plex     []plex.Config     `yaml:"plex"`
-	} `yaml:"targets"`
+	Targets targetsConfig `yaml:"targets"`
 }
 
 // ready is set to true after autoscan has fully initialised, and is used by the
@@ -93,7 +112,7 @@ var (
 		Database  string `type:"path" default:"${database_file}" env:"AUTOSCAN_DATABASE" help:"Database file path"`
 		Log       string `type:"path" default:"${log_file}" env:"AUTOSCAN_LOG" help:"Log file path"`
 		Verbosity int    `type:"counter" default:"0" short:"v" env:"AUTOSCAN_VERBOSITY" help:"Log level verbosity"`
-	LogLevel  string `default:"" env:"AUTOSCAN_LOG_LEVEL" help:"Log level (trace,debug,info,warn,error,fatal)"`
+		LogLevel  string `default:"" env:"AUTOSCAN_LOG_LEVEL" help:"Log level (trace,debug,info,warn,error,fatal)"`
 	}
 )
 
@@ -103,9 +122,9 @@ type globals struct {
 
 type versionFlag string
 
-func (v versionFlag) Decode(ctx *kong.DecodeContext) error { return nil }
-func (v versionFlag) IsBool() bool                         { return true }
-func (v versionFlag) BeforeApply(app *kong.Kong, vars kong.Vars) error {
+func (versionFlag) Decode(_ *kong.DecodeContext) error { return nil }
+func (versionFlag) IsBool() bool                       { return true }
+func (versionFlag) BeforeApply(app *kong.Kong, vars kong.Vars) error { //nolint:unparam // satisfies kong.Hook interface
 	fmt.Println(vars["version"])
 	app.Exit(0)
 	return nil
@@ -135,33 +154,7 @@ func main() {
 	}
 
 	// logger
-	logger := log.Output(io.MultiWriter(zerolog.ConsoleWriter{
-		TimeFormat: time.Stamp,
-		Out:        os.Stderr,
-	}, &lumberjack.Logger{
-		Filename:   cli.Log,
-		MaxSize:    5,
-		MaxAge:     14,
-		MaxBackups: 5,
-	}))
-
-	if cli.LogLevel != "" {
-		level, err := zerolog.ParseLevel(cli.LogLevel)
-		if err != nil {
-			log.Logger = logger.Level(zerolog.InfoLevel)
-			log.Fatal().Str("level", cli.LogLevel).Msg("Invalid Log Level")
-		}
-		log.Logger = logger.Level(level)
-	} else {
-		switch {
-		case cli.Verbosity == 1:
-			log.Logger = logger.Level(zerolog.DebugLevel)
-		case cli.Verbosity > 1:
-			log.Logger = logger.Level(zerolog.TraceLevel)
-		default:
-			log.Logger = logger.Level(zerolog.InfoLevel)
-		}
-	}
+	setupLogger()
 
 	// datastore
 	dbCtx := context.Background()
@@ -173,38 +166,67 @@ func main() {
 	}
 
 	// config
-	file, err := os.Open(cli.Config)
-	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Config Open Failed")
-	}
-	defer func() {
-		_ = file.Close()
-	}()
-
-	// set default values
-	c := config{
-		MinimumAge: 10 * time.Minute,
-		ScanDelay:  5 * time.Second,
-		ScanStats:  1 * time.Hour,
-		Host:       []string{""},
-		Port:       3030,
-	}
-
-	decoder := yaml.NewDecoder(file)
-	decoder.SetStrict(true)
-	err = decoder.Decode(&c)
-	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Config Decode Failed")
-	}
+	cfg := loadConfig()
 
 	// processor
+	proc := initProcessor(cfg, db)
+
+	// Check authentication. If no auth -> warn user.
+	if cfg.Auth.Username == "" || cfg.Auth.Password == "" {
+		log.Warn().Msg("Webhooks Unauthenticated")
+	}
+
+	// daemon triggers
+	initDaemonTriggers(cfg, db, proc.Add)
+
+	// http triggers
+	router := getRouter(cfg, proc)
+
+	startHTTPServers(cfg, router)
+
+	log.Info().
+		Int("manual", 1).
+		Int("bernard", len(cfg.Triggers.Bernard)).
+		Int("inotify", len(cfg.Triggers.Inotify)).
+		Int("lidarr", len(cfg.Triggers.Lidarr)).
+		Int("radarr", len(cfg.Triggers.Radarr)).
+		Int("readarr", len(cfg.Triggers.Readarr)).
+		Int("sonarr", len(cfg.Triggers.Sonarr)).
+		Msg("Triggers Initialised")
+
+	// targets
+	targets := initTargets(cfg)
+
+	log.Info().
+		Int("autoscan", len(cfg.Targets.Autoscan)).
+		Int("plex", len(cfg.Targets.Plex)).
+		Int("emby", len(cfg.Targets.Emby)).
+		Int("jellyfin", len(cfg.Targets.Jellyfin)).
+		Msg("Targets Initialised")
+
+	// scan stats
+	if cfg.ScanStats.Seconds() > 0 {
+		go scanStats(proc, cfg.ScanStats)
+	}
+
+	// display initialised banner
+	log.Info().
+		Str("version", fmt.Sprintf("%s (%s@%s)", Version, GitCommit, Timestamp)).
+		Msg("Autoscan Initialised")
+
+	notifyReady(proc)
+
+	// processor
+	log.Info().Msg("Processor Started")
+	runScanLoop(proc, targets, cfg.ScanDelay)
+}
+
+// initProcessor creates and returns the scan processor from config and database.
+// Calls log.Fatal on initialisation error.
+func initProcessor(cfg config, db *sqlite.DB) *processor.Processor {
 	proc, err := processor.New(processor.Config{
-		Anchors:    c.Anchors,
-		MinimumAge: c.MinimumAge,
+		Anchors:    cfg.Anchors,
+		MinimumAge: cfg.MinimumAge,
 		Db:         db,
 	})
 	if err != nil {
@@ -214,17 +236,137 @@ func main() {
 	}
 
 	log.Info().
-		Stringer("min_age", c.MinimumAge).
-		Strs("anchors", c.Anchors).
+		Stringer("min_age", cfg.MinimumAge).
+		Strs("anchors", cfg.Anchors).
 		Msg("Processor Initialised")
 
-	// Check authentication. If no auth -> warn user.
-	if c.Auth.Username == "" || c.Auth.Password == "" {
-		log.Warn().Msg("Webhooks Unauthenticated")
+	return proc
+}
+
+// startHTTPServers starts one goroutine per host address that serves the router.
+// Calls log.Fatal if any server fails to start.
+func startHTTPServers(cfg config, router http.Handler) {
+	for _, hostAddr := range cfg.Host {
+		go func(host string) {
+			addr := host
+			if !strings.Contains(addr, ":") {
+				addr = fmt.Sprintf("%s:%d", host, cfg.Port)
+			}
+
+			log.Info().Str("addr", addr).Msg("Server Starting")
+			server := &http.Server{
+				Addr:         addr,
+				Handler:      router,
+				ReadTimeout:  serverTimeout,
+				WriteTimeout: serverTimeout,
+			}
+			if listenErr := server.ListenAndServe(); listenErr != nil {
+				log.Fatal().
+					Str("addr", addr).
+					Err(listenErr).
+					Msg("Server Start Failed")
+			}
+		}(hostAddr)
+	}
+}
+
+// notifyReady marks the process as ready (sd_notify + ready flag) and installs
+// a signal handler that closes the processor and exits on SIGINT/SIGTERM.
+func notifyReady(proc *processor.Processor) {
+	// TODO: Add WatchdogSec support — send periodic WATCHDOG=1 from the processing loop
+	// to auto-restart hung processes.
+	ready.Store(true)
+
+	sdOK, err := daemon.SdNotify(false, daemon.SdNotifyReady)
+	if err != nil {
+		log.Warn().Err(err).Msg("sd_notify Failed")
+	} else if sdOK {
+		log.Info().Msg("sd_notify Ready Sent")
 	}
 
-	// daemon triggers
-	for _, t := range c.Triggers.Bernard {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigCh
+		log.Info().Str("signal", sig.String()).Msg("Shutdown Signal")
+		_ = proc.Close()
+		os.Exit(0) //nolint:revive // signal handler must exit the process
+	}()
+}
+
+// loadConfig reads and decodes the YAML config file, applying defaults.
+// Calls log.Fatal on any I/O or decode error.
+func loadConfig() config {
+	file, err := os.Open(cli.Config)
+	if err != nil {
+		log.Fatal().
+			Err(err).
+			Msg("Config Open Failed")
+	}
+
+	// set default values
+	cfg := config{
+		MinimumAge: 10 * time.Minute,
+		ScanDelay:  defaultScanDelay,
+		ScanStats:  1 * time.Hour,
+		Host:       []string{""},
+		Port:       defaultPort,
+	}
+
+	decoder := yaml.NewDecoder(file)
+	decoder.SetStrict(true)
+	err = decoder.Decode(&cfg)
+	_ = file.Close()
+
+	if err != nil {
+		log.Fatal().
+			Err(err).
+			Msg("Config Decode Failed")
+	}
+
+	return cfg
+}
+
+// setupLogger configures the global zerolog logger using the CLI flags.
+// Log level is set from --log-level if provided, otherwise from verbosity count.
+func setupLogger() {
+	logger := log.Output(io.MultiWriter(zerolog.ConsoleWriter{
+		TimeFormat: time.Stamp,
+		Out:        os.Stderr,
+	}, &lumberjack.Logger{
+		Filename:   cli.Log,
+		MaxSize:    logMaxSizeMB,
+		MaxAge:     logMaxAgeDays,
+		MaxBackups: logMaxBackups,
+	}))
+
+	if cli.LogLevel != "" {
+		level, err := zerolog.ParseLevel(cli.LogLevel)
+		if err != nil {
+			log.Logger = logger.Level(zerolog.InfoLevel)
+			log.Fatal().Str("level", cli.LogLevel).Msg("Invalid Log Level")
+		}
+
+		log.Logger = logger.Level(level)
+
+		return
+	}
+
+	switch {
+	case cli.Verbosity == 1:
+		log.Logger = logger.Level(zerolog.DebugLevel)
+	case cli.Verbosity > 1:
+		log.Logger = logger.Level(zerolog.TraceLevel)
+	default:
+		log.Logger = logger.Level(zerolog.InfoLevel)
+	}
+}
+
+// initDaemonTriggers starts the bernard and inotify background triggers.
+// Calls log.Fatal on any initialisation error.
+func initDaemonTriggers(cfg config, db *sqlite.DB, add autoscan.ProcessorFunc) {
+	for _, t := range cfg.Triggers.Bernard {
 		trigger, err := bernard.New(t, db.RW())
 		if err != nil {
 			log.Fatal().
@@ -233,10 +375,10 @@ func main() {
 				Msg("Trigger Init Failed")
 		}
 
-		go trigger(proc.Add)
+		go trigger(add)
 	}
 
-	for _, t := range c.Triggers.Inotify {
+	for _, t := range cfg.Triggers.Inotify {
 		trigger, err := inotify.New(t)
 		if err != nil {
 			log.Fatal().
@@ -245,44 +387,18 @@ func main() {
 				Msg("Trigger Init Failed")
 		}
 
-		go trigger(proc.Add)
+		go trigger(add)
 	}
+}
 
-	// http triggers
-	router := getRouter(c, proc)
+// initTargets builds the list of scan targets from the config.
+// Calls log.Fatal on any initialisation error.
+func initTargets(cfg config) []autoscan.Target {
+	targetCount := len(cfg.Targets.Autoscan) + len(cfg.Targets.Plex) + len(cfg.Targets.Emby) + len(cfg.Targets.Jellyfin)
+	targets := make([]autoscan.Target, 0, targetCount)
 
-	for _, h := range c.Host {
-		go func(host string) {
-			addr := host
-			if !strings.Contains(addr, ":") {
-				addr = fmt.Sprintf("%s:%d", host, c.Port)
-			}
-
-			log.Info().Str("addr", addr).Msg("Server Starting")
-			if err := http.ListenAndServe(addr, router); err != nil {
-				log.Fatal().
-					Str("addr", addr).
-					Err(err).
-					Msg("Server Start Failed")
-			}
-		}(h)
-	}
-
-	log.Info().
-		Int("manual", 1).
-		Int("bernard", len(c.Triggers.Bernard)).
-		Int("inotify", len(c.Triggers.Inotify)).
-		Int("lidarr", len(c.Triggers.Lidarr)).
-		Int("radarr", len(c.Triggers.Radarr)).
-		Int("readarr", len(c.Triggers.Readarr)).
-		Int("sonarr", len(c.Triggers.Sonarr)).
-		Msg("Triggers Initialised")
-
-	// targets
-	targets := make([]autoscan.Target, 0)
-
-	for _, t := range c.Targets.Autoscan {
-		tp, err := ast.New(t)
+	for _, t := range cfg.Targets.Autoscan {
+		target, err := ast.New(t)
 		if err != nil {
 			log.Fatal().
 				Err(err).
@@ -291,11 +407,11 @@ func main() {
 				Msg("Target Init Failed")
 		}
 
-		targets = append(targets, tp)
+		targets = append(targets, target)
 	}
 
-	for _, t := range c.Targets.Plex {
-		tp, err := plex.New(t)
+	for _, t := range cfg.Targets.Plex {
+		target, err := plex.New(t)
 		if err != nil {
 			log.Fatal().
 				Err(err).
@@ -304,11 +420,11 @@ func main() {
 				Msg("Target Init Failed")
 		}
 
-		targets = append(targets, tp)
+		targets = append(targets, target)
 	}
 
-	for _, t := range c.Targets.Emby {
-		tp, err := emby.New(t)
+	for _, t := range cfg.Targets.Emby {
+		target, err := emby.New(t)
 		if err != nil {
 			log.Fatal().
 				Err(err).
@@ -317,11 +433,11 @@ func main() {
 				Msg("Target Init Failed")
 		}
 
-		targets = append(targets, tp)
+		targets = append(targets, target)
 	}
 
-	for _, t := range c.Targets.Jellyfin {
-		tp, err := jellyfin.New(t)
+	for _, t := range cfg.Targets.Jellyfin {
+		target, err := jellyfin.New(t)
 		if err != nil {
 			log.Fatal().
 				Err(err).
@@ -330,51 +446,18 @@ func main() {
 				Msg("Target Init Failed")
 		}
 
-		targets = append(targets, tp)
+		targets = append(targets, target)
 	}
 
-	log.Info().
-		Int("autoscan", len(c.Targets.Autoscan)).
-		Int("plex", len(c.Targets.Plex)).
-		Int("emby", len(c.Targets.Emby)).
-		Int("jellyfin", len(c.Targets.Jellyfin)).
-		Msg("Targets Initialised")
+	return targets
+}
 
-	// scan stats
-	if c.ScanStats.Seconds() > 0 {
-		go scanStats(proc, c.ScanStats)
-	}
-
-	// display initialised banner
-	log.Info().
-		Str("version", fmt.Sprintf("%s (%s@%s)", Version, GitCommit, Timestamp)).
-		Msg("Autoscan Initialised")
-
-	// Notify systemd that initialization is complete.
-	// TODO: Add WatchdogSec support — send periodic WATCHDOG=1 from the processing loop
-	// to auto-restart hung processes.
-	ready.Store(true)
-	if ok, err := daemon.SdNotify(false, daemon.SdNotifyReady); err != nil {
-		log.Warn().Err(err).Msg("sd_notify Failed")
-	} else if ok {
-		log.Info().Msg("sd_notify Ready Sent")
-	}
-
-	// signal handler
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		sig := <-sigCh
-		log.Info().Str("signal", sig.String()).Msg("Shutdown Signal")
-		_ = proc.Close()
-		os.Exit(0)
-	}()
-
-	// processor
-	log.Info().Msg("Processor Started")
-
+// runScanLoop runs the main processing loop until the process exits.
+// It checks target availability before processing and backs off on transient errors.
+func runScanLoop(proc *processor.Processor, targets []autoscan.Target, scanDelay time.Duration) {
 	targetsAvailable := false
 	targetsSize := len(targets)
+
 	for {
 		// exit when no targets setup
 		if targetsSize == 0 {
@@ -383,7 +466,7 @@ func main() {
 
 		// target availability checker
 		if !targetsAvailable {
-			err = proc.CheckAvailability(targets)
+			err := proc.CheckAvailability(targets)
 			switch {
 			case err == nil:
 				targetsAvailable = true
@@ -393,31 +476,31 @@ func main() {
 
 			default:
 				log.Error().Err(err).Msg("Targets Unavailable")
-				time.Sleep(15 * time.Second)
+				time.Sleep(noScansDelay)
 				continue
 			}
 		}
 
 		// process scans
-		err = proc.Process(targets)
+		err := proc.Process(targets)
 		switch {
 		case err == nil:
 			// Sleep scan-delay between successful requests to reduce the load on targets.
-			time.Sleep(c.ScanDelay)
+			time.Sleep(scanDelay)
 
 		case errors.Is(err, autoscan.ErrNoScans):
 			// No scans currently available, let's wait a couple of seconds
 			log.Trace().Msg("No Scans Available")
-			time.Sleep(15 * time.Second)
+			time.Sleep(noScansDelay)
 
 		case errors.Is(err, autoscan.ErrAnchorUnavailable):
 			log.Error().Err(err).Msg("Anchors Unavailable")
-			time.Sleep(15 * time.Second)
+			time.Sleep(noScansDelay)
 
 		case errors.Is(err, autoscan.ErrTargetUnavailable):
 			targetsAvailable = false
 			log.Error().Err(err).Msg("Targets Unavailable")
-			time.Sleep(15 * time.Second)
+			time.Sleep(noScansDelay)
 
 		case errors.Is(err, autoscan.ErrFatal):
 			log.Fatal().Err(err).Msg("Processing Failed")

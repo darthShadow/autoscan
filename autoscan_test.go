@@ -9,7 +9,7 @@ import (
 
 func TestLimitReadCloserTruncates(t *testing.T) {
 	overSize := maxResponseBodySize + 1024
-	body := strings.Repeat("x", int(overSize))
+	body := strings.Repeat("x", overSize)
 	rc := io.NopCloser(bytes.NewBufferString(body))
 	limited := LimitReadCloser(rc)
 

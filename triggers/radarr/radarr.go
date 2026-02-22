@@ -1,7 +1,9 @@
+// Package radarr provides an autoscan trigger for Radarr webhooks.
 package radarr
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"path"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"github.com/cloudbox/autoscan"
 )
 
+// Config holds configuration for the Radarr trigger.
 type Config struct {
 	Name      string             `yaml:"name"`
 	Priority  int                `yaml:"priority"`
@@ -23,7 +26,7 @@ type Config struct {
 func New(c Config) (autoscan.HTTPTrigger, error) {
 	rewriter, err := autoscan.NewRewriter(c.Rewrite)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create rewriter: %w", err)
 	}
 
 	trigger := func(callback autoscan.ProcessorFunc) http.Handler {
@@ -43,19 +46,21 @@ type handler struct {
 	callback autoscan.ProcessorFunc
 }
 
-type radarrEvent struct {
-	Type string `json:"eventType"`
-
-	File struct {
-		RelativePath string
-	} `json:"movieFile"`
-
-	Movie struct {
-		FolderPath string
-	} `json:"movie"`
+type radarrFile struct {
+	RelativePath string `json:"relativePath"`
 }
 
-func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+type radarrMovie struct {
+	FolderPath string `json:"folderPath"`
+}
+
+type radarrEvent struct {
+	Type  string      `json:"eventType"`
+	File  radarrFile  `json:"movieFile"`
+	Movie radarrMovie `json:"movie"`
+}
+
+func (h handler) ServeHTTP(writer http.ResponseWriter, r *http.Request) {
 	var err error
 	rlog := hlog.FromRequest(r)
 
@@ -63,7 +68,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	err = json.NewDecoder(r.Body).Decode(event)
 	if err != nil {
 		rlog.Error().Err(err).Msg("Request Decode Failed")
-		rw.WriteHeader(http.StatusBadRequest)
+		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -71,7 +76,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	if strings.EqualFold(event.Type, "Test") {
 		rlog.Info().Msg("Test Event")
-		rw.WriteHeader(http.StatusOK)
+		writer.WriteHeader(http.StatusOK)
 		return
 	}
 
@@ -83,7 +88,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	if strings.EqualFold(event.Type, "Download") || strings.EqualFold(event.Type, "MovieFileDelete") {
 		if event.File.RelativePath == "" || event.Movie.FolderPath == "" {
 			rlog.Error().Msg("Required Fields Missing")
-			rw.WriteHeader(http.StatusBadRequest)
+			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
@@ -94,7 +99,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	if strings.EqualFold(event.Type, "MovieDelete") || strings.EqualFold(event.Type, "Rename") {
 		if event.Movie.FolderPath == "" {
 			rlog.Error().Msg("Required Fields Missing")
-			rw.WriteHeader(http.StatusBadRequest)
+			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
@@ -111,7 +116,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	err = h.callback(scan)
 	if err != nil {
 		rlog.Error().Err(err).Msg("Scan Enqueue Failed")
-		rw.WriteHeader(http.StatusInternalServerError)
+		writer.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
@@ -120,7 +125,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		Str("event", event.Type).
 		Msg("Scan Enqueued")
 
-	rw.WriteHeader(http.StatusOK)
+	writer.WriteHeader(http.StatusOK)
 }
 
 var now = time.Now

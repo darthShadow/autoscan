@@ -1,18 +1,16 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-
 	"github.com/cloudbox/autoscan/processor"
-	"github.com/cloudbox/autoscan/triggers/a_train"
+	atrain "github.com/cloudbox/autoscan/triggers/a_train"
 	"github.com/cloudbox/autoscan/triggers/lidarr"
 	"github.com/cloudbox/autoscan/triggers/manual"
 	"github.com/cloudbox/autoscan/triggers/radarr"
@@ -21,27 +19,27 @@ import (
 )
 
 func pattern(name string) string {
-	return fmt.Sprintf("/%s", name)
+	return "/" + name
 }
 
-func createCredentials(c config) map[string]string {
+func createCredentials(cfg config) map[string]string {
 	creds := make(map[string]string)
-	creds[c.Auth.Username] = c.Auth.Password
+	creds[cfg.Auth.Username] = cfg.Auth.Password
 	return creds
 }
 
-func getRouter(c config, proc *processor.Processor) chi.Router {
-	r := chi.NewRouter()
+func getRouter(cfg config, proc *processor.Processor) chi.Router {
+	mux := chi.NewRouter()
 
 	// Middleware
-	r.Use(middleware.Recoverer)
+	mux.Use(middleware.Recoverer)
 
 	// Logging-related middleware
-	r.Use(hlog.NewHandler(log.Logger))
-	r.Use(hlog.RequestIDHandler("id", "request-id"))
-	r.Use(hlog.URLHandler("url"))
-	r.Use(hlog.MethodHandler("method"))
-	r.Use(hlog.AccessHandler(func(r *http.Request, status, size int, duration time.Duration) {
+	mux.Use(hlog.NewHandler(log.Logger))
+	mux.Use(hlog.RequestIDHandler("id", "request-id"))
+	mux.Use(hlog.URLHandler("url"))
+	mux.Use(hlog.MethodHandler("method"))
+	mux.Use(hlog.AccessHandler(func(r *http.Request, status, size int, duration time.Duration) {
 		hlog.FromRequest(r).Debug().
 			Int("status", status).
 			Dur("duration", duration).
@@ -49,74 +47,74 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 	}))
 
 	// Health check
-	r.Get("/health", healthHandler)
+	mux.Get("/health", healthHandler)
 
 	// HTTP-Triggers
-	r.Route("/triggers", func(r chi.Router) {
+	mux.Route("/triggers", func(sub chi.Router) {
 		// Use Basic Auth middleware if username and password are set.
-		if c.Auth.Username != "" && c.Auth.Password != "" {
-			r.Use(middleware.BasicAuth("Autoscan 1.x", createCredentials(c)))
+		if cfg.Auth.Username != "" && cfg.Auth.Password != "" {
+			sub.Use(middleware.BasicAuth("Autoscan 1.x", createCredentials(cfg)))
 		}
 
 		// A-Train HTTP-trigger
-		r.Route("/a-train", func(r chi.Router) {
-			trigger, err := a_train.New(c.Triggers.ATrain)
+		sub.Route("/a-train", func(sub chi.Router) {
+			trigger, err := atrain.New(cfg.Triggers.ATrain)
 			if err != nil {
 				log.Fatal().Err(err).Str("trigger", "a-train").Msg("Trigger Init Failed")
 			}
 
-			r.Post("/{drive}", trigger(proc.Add).ServeHTTP)
+			sub.Post("/{drive}", trigger(proc.Add).ServeHTTP)
 		})
 
 		// Mixed-style Manual HTTP-trigger
-		r.Route("/manual", func(r chi.Router) {
-			trigger, err := manual.New(c.Triggers.Manual)
+		sub.Route("/manual", func(sub chi.Router) {
+			trigger, err := manual.New(cfg.Triggers.Manual)
 			if err != nil {
 				log.Fatal().Err(err).Str("trigger", "manual").Msg("Trigger Init Failed")
 			}
 
-			r.HandleFunc("/", trigger(proc.Add).ServeHTTP)
+			sub.HandleFunc("/", trigger(proc.Add).ServeHTTP)
 		})
 
 		// OLD-style HTTP-triggers. Can be converted to the /{trigger}/{id} format in a 2.0 release.
-		for _, t := range c.Triggers.Lidarr {
+		for _, t := range cfg.Triggers.Lidarr {
 			trigger, err := lidarr.New(t)
 			if err != nil {
 				log.Fatal().Err(err).Str("trigger", t.Name).Msg("Trigger Init Failed")
 			}
 
-			r.Post(pattern(t.Name), trigger(proc.Add).ServeHTTP)
+			sub.Post(pattern(t.Name), trigger(proc.Add).ServeHTTP)
 		}
 
-		for _, t := range c.Triggers.Radarr {
+		for _, t := range cfg.Triggers.Radarr {
 			trigger, err := radarr.New(t)
 			if err != nil {
 				log.Fatal().Err(err).Str("trigger", t.Name).Msg("Trigger Init Failed")
 			}
 
-			r.Post(pattern(t.Name), trigger(proc.Add).ServeHTTP)
+			sub.Post(pattern(t.Name), trigger(proc.Add).ServeHTTP)
 		}
 
-		for _, t := range c.Triggers.Readarr {
+		for _, t := range cfg.Triggers.Readarr {
 			trigger, err := readarr.New(t)
 			if err != nil {
 				log.Fatal().Err(err).Str("trigger", t.Name).Msg("Trigger Init Failed")
 			}
 
-			r.Post(pattern(t.Name), trigger(proc.Add).ServeHTTP)
+			sub.Post(pattern(t.Name), trigger(proc.Add).ServeHTTP)
 		}
 
-		for _, t := range c.Triggers.Sonarr {
+		for _, t := range cfg.Triggers.Sonarr {
 			trigger, err := sonarr.New(t)
 			if err != nil {
 				log.Fatal().Err(err).Str("trigger", t.Name).Msg("Trigger Init Failed")
 			}
 
-			r.Post(pattern(t.Name), trigger(proc.Add).ServeHTTP)
+			sub.Post(pattern(t.Name), trigger(proc.Add).ServeHTTP)
 		}
 	})
 
-	return r
+	return mux
 }
 
 // Other Handlers

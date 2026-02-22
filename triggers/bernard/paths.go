@@ -9,11 +9,13 @@ import (
 	"github.com/l3uddz/bernard/datastore/sqlite"
 )
 
+// Paths holds the new and old folder paths produced by a Bernard diff hook.
 type Paths struct {
 	NewFolders []string
 	OldFolders []string
 }
 
+// NewPathsHook creates a Bernard hook that collects new and old folder paths from a diff.
 func NewPathsHook(driveID string, store *bds, diff *sqlite.Difference) (bernard.Hook, *Paths) {
 	var paths Paths
 
@@ -83,13 +85,14 @@ func getDiffFolderMaps(diff *sqlite.Difference) *diffFolderMaps {
 	}
 }
 
+// Parents holds the old and new parent folders involved in a Bernard diff.
 type Parents struct {
 	New        []datastore.Folder
 	Old        []datastore.Folder
 	FolderMaps *diffFolderMaps
 }
 
-func getDiffFolders(store *bds, driveId string, diff *sqlite.Difference) (*Parents, error) {
+func getDiffFolders(store *bds, driveID string, diff *sqlite.Difference) (*Parents, error) {
 	folderMaps := getDiffFolderMaps(diff)
 
 	newParents := make(map[string]datastore.Folder)
@@ -108,7 +111,7 @@ func getDiffFolders(store *bds, driveId string, diff *sqlite.Difference) (*Paren
 
 	// added files
 	for _, file := range diff.AddedFiles {
-		folder, err := getFolder(store, driveId, file.Parent, folderMaps.Current)
+		folder, err := getFolder(store, driveID, file.Parent, folderMaps.Current)
 		if err != nil {
 			return nil, fmt.Errorf("added file: %w", err)
 		}
@@ -119,7 +122,7 @@ func getDiffFolders(store *bds, driveId string, diff *sqlite.Difference) (*Paren
 	// changed files
 	for _, file := range diff.ChangedFiles {
 		// current
-		currentFolder, err := getFolder(store, driveId, file.New.Parent, folderMaps.Current)
+		currentFolder, err := getFolder(store, driveID, file.New.Parent, folderMaps.Current)
 		if err != nil {
 			return nil, fmt.Errorf("changed new file: %w", err)
 		}
@@ -127,7 +130,7 @@ func getDiffFolders(store *bds, driveId string, diff *sqlite.Difference) (*Paren
 		newParents[currentFolder.ID] = *currentFolder
 
 		// old
-		oldFolder, err := getFolder(store, driveId, file.Old.Parent, folderMaps.Old)
+		oldFolder, err := getFolder(store, driveID, file.Old.Parent, folderMaps.Old)
 		if err != nil {
 			return nil, fmt.Errorf("changed old file: %w", err)
 		}
@@ -137,7 +140,7 @@ func getDiffFolders(store *bds, driveId string, diff *sqlite.Difference) (*Paren
 
 	// removed files
 	for _, file := range diff.RemovedFiles {
-		oldFolder, err := getFolder(store, driveId, file.Parent, folderMaps.Old)
+		oldFolder, err := getFolder(store, driveID, file.Parent, folderMaps.Old)
 		if err != nil {
 			return nil, fmt.Errorf("removed file: %w", err)
 		}
@@ -146,45 +149,45 @@ func getDiffFolders(store *bds, driveId string, diff *sqlite.Difference) (*Paren
 	}
 
 	// create Parents object
-	p := &Parents{
+	pathResult := &Parents{
 		New:        make([]datastore.Folder, 0),
 		Old:        make([]datastore.Folder, 0),
 		FolderMaps: folderMaps,
 	}
 
 	for _, folder := range newParents {
-		p.New = append(p.New, folder)
+		pathResult.New = append(pathResult.New, folder)
 	}
 
 	for _, folder := range oldParents {
-		p.Old = append(p.Old, folder)
+		pathResult.Old = append(pathResult.Old, folder)
 	}
 
-	return p, nil
+	return pathResult, nil
 }
 
-func getFolder(store *bds, driveId string, folderId string, folderMap map[string]datastore.Folder) (*datastore.Folder, error) {
+func getFolder(store *bds, driveID, folderID string, folderMap map[string]datastore.Folder) (*datastore.Folder, error) {
 	// find folder in map
-	if folder, ok := folderMap[folderId]; ok {
+	if folder, ok := folderMap[folderID]; ok {
 		return &folder, nil
 	}
 
-	if folderId == driveId {
+	if folderID == driveID {
 		folder := datastore.Folder{
-			ID:      driveId,
+			ID:      driveID,
 			Name:    "",
 			Parent:  "",
 			Trashed: false,
 		}
 
-		folderMap[driveId] = folder
+		folderMap[driveID] = folder
 		return &folder, nil
 	}
 
 	// search datastore
-	folder, err := store.GetFolder(driveId, folderId)
+	folder, err := store.GetFolder(driveID, folderID)
 	if err != nil {
-		return nil, fmt.Errorf("could not get folder: %v: %w", folderId, err)
+		return nil, fmt.Errorf("could not get folder: %v: %w", folderID, err)
 	}
 
 	// add folder to map
@@ -193,20 +196,20 @@ func getFolder(store *bds, driveId string, folderId string, folderMap map[string
 	return folder, nil
 }
 
-func getFolderPath(store *bds, driveId string, folderId string, folderMap map[string]datastore.Folder) (string, error) {
+func getFolderPath(store *bds, driveID, folderID string, folderMap map[string]datastore.Folder) (string, error) {
 	path := ""
 
-	// folderId == driveId
-	if folderId == driveId {
+	// folderID == driveID
+	if folderID == driveID {
 		return "/", nil
 	}
 
 	// get top folder
-	topFolder, ok := folderMap[folderId]
+	topFolder, ok := folderMap[folderID]
 	if !ok {
-		f, err := store.GetFolder(driveId, folderId)
+		f, err := store.GetFolder(driveID, folderID)
 		if err != nil {
-			return filepath.Join("/", path), fmt.Errorf("could not get folder %v: %w", folderId, err)
+			return "/" + path, fmt.Errorf("could not get folder %v: %w", folderID, err)
 		}
 
 		topFolder = *f
@@ -214,24 +217,24 @@ func getFolderPath(store *bds, driveId string, folderId string, folderMap map[st
 
 	// set logic variables
 	path = topFolder.Name
-	nextFolderId := topFolder.Parent
+	nextFolderID := topFolder.Parent
 
 	// get folder paths
-	for nextFolderId != "" && nextFolderId != driveId {
-		f, ok := folderMap[nextFolderId]
+	for nextFolderID != "" && nextFolderID != driveID {
+		folderEntry, ok := folderMap[nextFolderID]
 		if !ok {
-			df, err := store.GetFolder(driveId, nextFolderId)
+			df, err := store.GetFolder(driveID, nextFolderID)
 			if err != nil {
-				return filepath.Join("/", path), fmt.Errorf("could not get folder %v: %w", nextFolderId, err)
+				return "/" + path, fmt.Errorf("could not get folder %v: %w", nextFolderID, err)
 			}
 
-			f = *df
-			folderMap[f.ID] = f
+			folderEntry = *df
+			folderMap[folderEntry.ID] = folderEntry
 		}
 
-		path = filepath.Join(f.Name, path)
-		nextFolderId = f.Parent
+		path = filepath.Join(folderEntry.Name, path)
+		nextFolderID = folderEntry.Parent
 	}
 
-	return filepath.Join("/", path), nil
+	return "/" + path, nil
 }

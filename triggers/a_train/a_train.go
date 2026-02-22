@@ -1,7 +1,9 @@
-package a_train
+// Package atrain provides an autoscan trigger for A-Train Google Drive webhooks.
+package atrain
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -11,11 +13,13 @@ import (
 	"github.com/cloudbox/autoscan"
 )
 
+// Drive holds configuration for a single Google Drive to monitor via A-Train.
 type Drive struct {
 	ID      string             `yaml:"id"`
 	Rewrite []autoscan.Rewrite `yaml:"rewrite"`
 }
 
+// Config holds configuration for the A-Train trigger.
 type Config struct {
 	Drives    []Drive            `yaml:"drives"`
 	Priority  int                `yaml:"priority"`
@@ -23,26 +27,27 @@ type Config struct {
 	Verbosity string             `yaml:"verbosity"`
 }
 
-type ATrainRewriter = func(drive string, input string) string
+// Rewriter is a function that rewrites a Google Drive path for a given drive ID and input path.
+type Rewriter = func(drive, input string) string
 
-// // New creates an autoscan-compatible HTTP Trigger for A-Train webhooks.
-func New(c Config) (autoscan.HTTPTrigger, error) {
+// New creates an autoscan-compatible HTTP Trigger for A-Train webhooks.
+func New(cfg Config) (autoscan.HTTPTrigger, error) {
 	rewrites := make(map[string]autoscan.Rewriter)
-	for _, drive := range c.Drives {
-		rewriter, err := autoscan.NewRewriter(append(drive.Rewrite, c.Rewrite...))
+	for _, drive := range cfg.Drives {
+		rewriter, err := autoscan.NewRewriter(append(drive.Rewrite, cfg.Rewrite...))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("create drive rewriter: %w", err)
 		}
 
 		rewrites[drive.ID] = rewriter
 	}
 
-	globalRewriter, err := autoscan.NewRewriter(c.Rewrite)
+	globalRewriter, err := autoscan.NewRewriter(cfg.Rewrite)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create global rewriter: %w", err)
 	}
 
-	rewriter := func(drive string, input string) string {
+	rewriter := func(drive, input string) string {
 		driveRewriter, ok := rewrites[drive]
 		if !ok {
 			return globalRewriter(input)
@@ -54,7 +59,7 @@ func New(c Config) (autoscan.HTTPTrigger, error) {
 	trigger := func(callback autoscan.ProcessorFunc) http.Handler {
 		return handler{
 			callback: callback,
-			priority: c.Priority,
+			priority: cfg.Priority,
 			rewrite:  rewriter,
 		}
 	}
@@ -64,16 +69,16 @@ func New(c Config) (autoscan.HTTPTrigger, error) {
 
 type handler struct {
 	priority int
-	rewrite  ATrainRewriter
+	rewrite  Rewriter
 	callback autoscan.ProcessorFunc
 }
 
 type atrainEvent struct {
-	Created []string
-	Deleted []string
+	Created []string `json:"created"`
+	Deleted []string `json:"deleted"`
 }
 
-func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+func (h handler) ServeHTTP(writer http.ResponseWriter, r *http.Request) {
 	var err error
 	rlog := hlog.FromRequest(r)
 
@@ -83,7 +88,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	err = json.NewDecoder(r.Body).Decode(event)
 	if err != nil {
 		rlog.Error().Err(err).Msg("Request Decode Failed")
-		rw.WriteHeader(http.StatusBadRequest)
+		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -110,7 +115,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	err = h.callback(scans...)
 	if err != nil {
 		rlog.Error().Err(err).Msg("Scan Enqueue Failed")
-		rw.WriteHeader(http.StatusInternalServerError)
+		writer.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
@@ -118,7 +123,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		rlog.Info().Str("path", scan.Folder).Msg("Scan Enqueued")
 	}
 
-	rw.WriteHeader(http.StatusOK)
+	writer.WriteHeader(http.StatusOK)
 }
 
 var now = time.Now

@@ -3,7 +3,7 @@ package processor
 import (
 	"context"
 	"errors"
-	"os"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -22,22 +22,18 @@ func (store *datastore) GetScan(folder string) (autoscan.Scan, error) {
 	row := store.db.RO().QueryRow(sqlGetScan, folder)
 
 	scan := autoscan.Scan{}
-	err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time)
+	if err := row.Scan(&scan.Folder, &scan.Priority, &scan.Time); err != nil {
+		return scan, fmt.Errorf("scan test row: %w", err)
+	}
 
-	return scan, err
+	return scan, nil
 }
 
 func getDatastore(t *testing.T) *datastore {
-	// Create a temporary directory for the test database
-	tempDir, err := os.MkdirTemp("", "autoscan_test_")
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Helper()
 
-	// Clean up the temp directory when the test completes
-	t.Cleanup(func() {
-		os.RemoveAll(tempDir)
-	})
+	// Create a temporary directory for the test database
+	tempDir := t.TempDir()
 
 	dbPath := filepath.Join(tempDir, "test.db")
 	ctx := context.Background()
@@ -48,7 +44,7 @@ func getDatastore(t *testing.T) *datastore {
 
 	// Clean up the database connection when the test completes
 	t.Cleanup(func() {
-		db.Close()
+		_ = db.Close()
 	})
 
 	ds, err := newDatastore(db)
@@ -120,7 +116,7 @@ func TestUpsert(t *testing.T) {
 
 			if !reflect.DeepEqual(tc.WantScan, scan) {
 				t.Log(scan)
-				t.Errorf("Scans do not equal")
+				t.Error("Scans do not equal")
 			}
 		})
 	}
@@ -219,7 +215,7 @@ func TestGetAvailableScan(t *testing.T) {
 			if !reflect.DeepEqual(scan, tc.WantScan) {
 				t.Log(scan)
 				t.Log(tc.WantScan)
-				t.Errorf("Scan does not match")
+				t.Error("Scan does not match")
 			}
 		})
 	}
@@ -302,7 +298,7 @@ func TestGetAvailableScanEdgeCases(t *testing.T) {
 			if !reflect.DeepEqual(scan, tc.WantScan) {
 				t.Log("Got:", scan)
 				t.Log("Want:", tc.WantScan)
-				t.Errorf("Scan does not match")
+				t.Error("Scan does not match")
 			}
 		})
 	}
@@ -352,7 +348,7 @@ func TestDelete(t *testing.T) {
 
 			if !reflect.DeepEqual(scans, tc.WantScans) {
 				t.Log(scans)
-				t.Errorf("Scans do not match")
+				t.Error("Scans do not match")
 			}
 		})
 	}

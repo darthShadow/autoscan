@@ -196,7 +196,7 @@ func TestHandler(t *testing.T) {
 					for _, scan := range tc.Expected.Scans {
 						t.Logf("  %+v", scan)
 					}
-					t.Errorf("Scans are not equal")
+					t.Error("Scans are not equal")
 					return errors.New("scans are not equal")
 				}
 
@@ -221,7 +221,7 @@ func TestHandler(t *testing.T) {
 				t.Fatalf("Request failed: %v", err)
 			}
 
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			if res.StatusCode != tc.Expected.StatusCode {
 				t.Errorf("Status codes do not match: %d vs %d", res.StatusCode, tc.Expected.StatusCode)
 			}

@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
@@ -16,35 +17,43 @@ type migration struct {
 }
 
 func (m *Migrator) verify() error {
-	if _, err := m.db.Exec(sqlSchema); err != nil {
+	if _, err := m.db.ExecContext(context.Background(), sqlSchema); err != nil {
 		return fmt.Errorf("schema: %w", err)
 	}
 	return nil
 }
 
-func (m *Migrator) versions(component string) (map[int]bool, error) {
-	rows, err := m.db.Query(sqlVersions, component)
+func (m *Migrator) versions(component string) (result map[int]bool, err error) {
+	rows, err := m.db.QueryContext(context.Background(), sqlVersions, component)
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
-	defer rows.Close()
 
-	versions := make(map[int]bool, 0)
+	defer func() {
+		if cerr := rows.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("rows close: %w", cerr)
+		}
+	}()
+
+	result = make(map[int]bool)
 	for rows.Next() {
 		var version int
-		if err := rows.Scan(&version); err != nil {
+		if err = rows.Scan(&version); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
 
-		versions[version] = true
+		result[version] = true
 	}
 
-	return versions, nil
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+	return result, nil
 }
 
 func (m *Migrator) exec(component string, migration *migration) (err error) {
 	// begin tx
-	tx, err := m.db.Begin()
+	tx, err := m.db.BeginTx(context.Background(), nil)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
@@ -54,7 +63,7 @@ func (m *Migrator) exec(component string, migration *migration) (err error) {
 		// roll back
 		if err != nil {
 			if errRb := tx.Rollback(); errRb != nil {
-				err = fmt.Errorf("rollback: %v: %w", errRb, err)
+				err = fmt.Errorf("rollback: %w: %w", errRb, err)
 			}
 			return
 		}
@@ -66,48 +75,48 @@ func (m *Migrator) exec(component string, migration *migration) (err error) {
 	}(tx)
 
 	// exec migration
-	if _, err := tx.Exec(migration.Schema); err != nil {
+	if _, err := tx.ExecContext(context.Background(), migration.Schema); err != nil {
 		return fmt.Errorf("exec: %w", err)
 	}
 
 	// insert migration version
-	if _, err := tx.Exec(sqlInsertVersion, component, migration.Version); err != nil {
+	if _, err := tx.ExecContext(context.Background(), sqlInsertVersion, component, migration.Version); err != nil {
 		return fmt.Errorf("schema_migration: %w", err)
 	}
 
 	return nil
 }
 
-func (m *Migrator) parse(fs *embed.FS) ([]*migration, error) {
+func (m *Migrator) parse(fsys *embed.FS) ([]*migration, error) {
 	// parse migrations from filesystem
-	files, err := fs.ReadDir(m.dir)
+	files, err := fsys.ReadDir(m.dir)
 	if err != nil {
 		return nil, fmt.Errorf("read migrations: %w", err)
 	}
 
 	// parse migrations
 	migrations := make([]*migration, 0)
-	for _, f := range files {
+	for _, file := range files {
 		// skip dirs
-		if f.IsDir() {
+		if file.IsDir() {
 			continue
 		}
 
 		// parse migration
-		md := new(migration)
-		if err := m.re.MatchToTarget(f.Name(), md); err != nil {
+		mig := new(migration)
+		if err := m.re.MatchToTarget(file.Name(), mig); err != nil {
 			return nil, fmt.Errorf("parse migration: %w", err)
 		}
 
-		b, err := fs.ReadFile(filepath.Join(m.dir, f.Name()))
+		b, err := fsys.ReadFile(filepath.Join(m.dir, file.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("read migration: %w", err)
 		}
-		md.Schema = string(b)
-		md.Filename = f.Name()
+		mig.Schema = string(b)
+		mig.Filename = file.Name()
 
 		// set migration
-		migrations = append(migrations, md)
+		migrations = append(migrations, mig)
 	}
 
 	// sort migrations
@@ -119,7 +128,9 @@ func (m *Migrator) parse(fs *embed.FS) ([]*migration, error) {
 }
 
 const (
-	sqlSchema        = `CREATE TABLE IF NOT EXISTS schema_migration (component VARCHAR(255) NOT NULL, version INTEGER NOT NULL, PRIMARY KEY (component, version))`
+	sqlSchema = "CREATE TABLE IF NOT EXISTS schema_migration" +
+		" (component VARCHAR(255) NOT NULL, version INTEGER NOT NULL," +
+		" PRIMARY KEY (component, version))"
 	sqlVersions      = `SELECT version FROM schema_migration WHERE component = ?`
 	sqlInsertVersion = `INSERT INTO schema_migration (component, version) VALUES (?, ?)`
 )

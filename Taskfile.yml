@@ -17,6 +17,22 @@ env:
   VERSION: 0.0.0-dev
 
 tasks:
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - go tool golangci-lint run ./...
+
+  lint:fmt:
+    desc: Run golangci-lint formatters
+    cmds:
+      - go tool golangci-lint fmt ./...
+
+  lint:fix:
+    desc: Run golangci-lint with auto-fix then reformat
+    cmds:
+      - go tool golangci-lint run --fix ./...
+      - go tool golangci-lint fmt ./...
+
   test:
     desc: Go tests
     cmds:

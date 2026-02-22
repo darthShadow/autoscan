@@ -142,7 +142,7 @@ func TestHandler(t *testing.T) {
 				if !reflect.DeepEqual(tc.Expected.Scans, scans) {
 					t.Log(scans)
 					t.Log(tc.Expected.Scans)
-					t.Errorf("Scans do not equal")
+					t.Error("Scans do not equal")
 					return errors.New("Scans do not equal")
 				}
 
@@ -167,7 +167,7 @@ func TestHandler(t *testing.T) {
 				t.Fatalf("Request failed: %v", err)
 			}
 
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			if res.StatusCode != tc.Expected.StatusCode {
 				t.Errorf("Status codes do not match: %d vs %d", res.StatusCode, tc.Expected.StatusCode)
 			}

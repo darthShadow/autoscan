@@ -1,7 +1,9 @@
+// Package emby provides an autoscan target for Emby media servers.
 package emby
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -19,7 +21,7 @@ type apiClient struct {
 	token   string
 }
 
-func newAPIClient(baseURL string, token string, log zerolog.Logger) apiClient {
+func newAPIClient(baseURL, token string, log zerolog.Logger) apiClient {
 	return apiClient{
 		client:  httpclient.New(),
 		log:     log,
@@ -32,9 +34,9 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 	req.Header.Set("X-Emby-Token", c.token)
 	req.Header.Set("Accept", "application/json") // Force JSON Response.
 
-	res, err := c.client.Do(req)
+	res, err := c.client.Do(req) //nolint:gosec // URL is user-configured in app config, SSRF is intentional
 	if err != nil {
-		return nil, fmt.Errorf("%v: %w", err, autoscan.ErrTargetUnavailable)
+		return nil, fmt.Errorf("%w: %w", err, autoscan.ErrTargetUnavailable)
 	}
 
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
@@ -48,12 +50,16 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 		Msg("Request failed")
 
 	// statusCode not in the 2xx range, close response
-	res.Body.Close()
+	_ = res.Body.Close()
 
 	switch res.StatusCode {
-	case 401:
+	case http.StatusUnauthorized:
 		return nil, fmt.Errorf("invalid emby token: %s: %w", res.Status, autoscan.ErrFatal)
-	case 404, 500, 502, 503, 504:
+	case http.StatusNotFound,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
 		return nil, fmt.Errorf("%s: %w", res.Status, autoscan.ErrTargetUnavailable)
 	default:
 		return nil, fmt.Errorf("%s: %w", res.Status, autoscan.ErrFatal)
@@ -63,9 +69,9 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 func (c apiClient) Available() error {
 	// create request
 	reqURL := autoscan.JoinURL(c.baseURL, "emby", "System", "Info")
-	req, err := http.NewRequest("GET", reqURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, reqURL, http.NoBody)
 	if err != nil {
-		return fmt.Errorf("failed creating availability request: %v: %w", err, autoscan.ErrFatal)
+		return fmt.Errorf("failed creating availability request: %w: %w", err, autoscan.ErrFatal)
 	}
 
 	// send request
@@ -74,7 +80,7 @@ func (c apiClient) Available() error {
 		return fmt.Errorf("availability: %w", err)
 	}
 
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	return nil
 }
 
@@ -86,9 +92,9 @@ type library struct {
 func (c apiClient) Libraries() ([]library, error) {
 	// create request
 	reqURL := autoscan.JoinURL(c.baseURL, "emby", "Library", "SelectableMediaFolders")
-	req, err := http.NewRequest("GET", reqURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, reqURL, http.NoBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed creating libraries request: %v: %w", err, autoscan.ErrFatal)
+		return nil, fmt.Errorf("failed creating libraries request: %w: %w", err, autoscan.ErrFatal)
 	}
 
 	// send request
@@ -97,19 +103,21 @@ func (c apiClient) Libraries() ([]library, error) {
 		return nil, fmt.Errorf("libraries: %w", err)
 	}
 
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	// decode response
+	type embySubFolder struct {
+		Path string `json:"Path"`
+	}
+
 	type Response struct {
-		Name    string `json:"Name"`
-		Folders []struct {
-			Path string `json:"Path"`
-		} `json:"SubFolders"`
+		Name    string          `json:"Name"`
+		Folders []embySubFolder `json:"SubFolders"`
 	}
 
 	resp := make([]Response, 0)
 	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
-		return nil, fmt.Errorf("failed decoding libraries request response: %v: %w", err, autoscan.ErrFatal)
+		return nil, fmt.Errorf("failed decoding libraries request response: %w: %w", err, autoscan.ErrFatal)
 	}
 
 	// process response
@@ -119,7 +127,7 @@ func (c apiClient) Libraries() ([]library, error) {
 			libPath := folder.Path
 
 			// Add trailing slash if there is none.
-			if len(libPath) > 0 && libPath[len(libPath)-1] != '/' {
+			if libPath != "" && libPath[len(libPath)-1] != '/' {
 				libPath += "/"
 			}
 
@@ -153,16 +161,16 @@ func (c apiClient) Scan(path string) error {
 		},
 	}
 
-	b, err := json.Marshal(payload)
+	b, err := json.Marshal(payload) //nolint:errchkjson // no interface{} fields; Marshal never errors here
 	if err != nil {
-		return fmt.Errorf("failed encoding scan request payload: %v: %w", err, autoscan.ErrFatal)
+		return fmt.Errorf("failed encoding scan request payload: %w: %w", err, autoscan.ErrFatal)
 	}
 
 	// create request
 	reqURL := autoscan.JoinURL(c.baseURL, "Library", "Media", "Updated")
-	req, err := http.NewRequest("POST", reqURL, bytes.NewBuffer(b))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, reqURL, bytes.NewBuffer(b))
 	if err != nil {
-		return fmt.Errorf("failed creating scan request: %v: %w", err, autoscan.ErrFatal)
+		return fmt.Errorf("failed creating scan request: %w: %w", err, autoscan.ErrFatal)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -173,6 +181,6 @@ func (c apiClient) Scan(path string) error {
 		return fmt.Errorf("scan: %w", err)
 	}
 
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	return nil
 }

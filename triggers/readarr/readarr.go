@@ -1,7 +1,9 @@
+// Package readarr provides an autoscan trigger for Readarr webhooks.
 package readarr
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"path"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"github.com/cloudbox/autoscan"
 )
 
+// Config holds configuration for the Readarr trigger.
 type Config struct {
 	Name      string             `yaml:"name"`
 	Priority  int                `yaml:"priority"`
@@ -23,7 +26,7 @@ type Config struct {
 func New(c Config) (autoscan.HTTPTrigger, error) {
 	rewriter, err := autoscan.NewRewriter(c.Rewrite)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create rewriter: %w", err)
 	}
 
 	trigger := func(callback autoscan.ProcessorFunc) http.Handler {
@@ -43,39 +46,41 @@ type handler struct {
 	callback autoscan.ProcessorFunc
 }
 
+type readarrFile struct {
+	Path string `json:"path"`
+}
+
 type readarrEvent struct {
 	Type    string `json:"eventType"`
 	Upgrade bool   `json:"isUpgrade"`
 
-	Files []struct {
-		Path string
-	} `json:"bookFiles"`
+	Files []readarrFile `json:"bookFiles"`
 }
 
-func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+func (h handler) ServeHTTP(writer http.ResponseWriter, r *http.Request) {
 	var err error
-	l := hlog.FromRequest(r)
+	logger := hlog.FromRequest(r)
 
 	event := new(readarrEvent)
 	err = json.NewDecoder(r.Body).Decode(event)
 	if err != nil {
-		l.Error().Err(err).Msg("Request Decode Failed")
-		rw.WriteHeader(http.StatusBadRequest)
+		logger.Error().Err(err).Msg("Request Decode Failed")
+		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	l.Trace().Interface("event", event).Msg("Webhook Payload")
+	logger.Trace().Interface("event", event).Msg("Webhook Payload")
 
 	if strings.EqualFold(event.Type, "Test") {
-		l.Info().Msg("Test Event")
-		rw.WriteHeader(http.StatusOK)
+		logger.Info().Msg("Test Event")
+		writer.WriteHeader(http.StatusOK)
 		return
 	}
 
 	// Only handle test and download. Everything else is ignored.
 	if !strings.EqualFold(event.Type, "Download") || len(event.Files) == 0 {
-		l.Error().Msg("Required Fields Missing")
-		rw.WriteHeader(http.StatusBadRequest)
+		logger.Error().Msg("Required Fields Missing")
+		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -99,13 +104,13 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	err = h.callback(scans...)
 	if err != nil {
-		l.Error().Err(err).Msg("Scan Enqueue Failed")
-		rw.WriteHeader(http.StatusInternalServerError)
+		logger.Error().Err(err).Msg("Scan Enqueue Failed")
+		writer.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	rw.WriteHeader(http.StatusOK)
-	l.Info().
+	writer.WriteHeader(http.StatusOK)
+	logger.Info().
 		Str("path", scans[0].Folder).
 		Str("event", event.Type).
 		Msg("Scan Enqueued")

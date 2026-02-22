@@ -1,6 +1,8 @@
+// Package plex provides an autoscan target for Plex media servers.
 package plex
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -20,7 +22,7 @@ type apiClient struct {
 	token   string
 }
 
-func newAPIClient(baseURL string, token string, log zerolog.Logger) *apiClient {
+func newAPIClient(baseURL, token string, log zerolog.Logger) *apiClient {
 	return &apiClient{
 		client:  httpclient.New(),
 		log:     log,
@@ -33,9 +35,9 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 	req.Header.Set("X-Plex-Token", c.token)
 	req.Header.Set("Accept", "application/json") // Force JSON Response.
 
-	res, err := c.client.Do(req)
+	res, err := c.client.Do(req) //nolint:gosec // URL is user-configured in app config, SSRF is intentional
 	if err != nil {
-		return nil, fmt.Errorf("%v: %w", err, autoscan.ErrTargetUnavailable)
+		return nil, fmt.Errorf("%w: %w", err, autoscan.ErrTargetUnavailable)
 	}
 
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
@@ -49,12 +51,16 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 		Msg("Request failed")
 
 	// statusCode not in the 2xx range, close response
-	res.Body.Close()
+	_ = res.Body.Close()
 
 	switch res.StatusCode {
-	case 401:
+	case http.StatusUnauthorized:
 		return nil, fmt.Errorf("invalid plex token: %s: %w", res.Status, autoscan.ErrFatal)
-	case 404, 500, 502, 503, 504:
+	case http.StatusNotFound,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
 		return nil, fmt.Errorf("%s: %w", res.Status, autoscan.ErrTargetUnavailable)
 	default:
 		return nil, fmt.Errorf("%s: %w", res.Status, autoscan.ErrFatal)
@@ -63,9 +69,9 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 
 func (c apiClient) Version() (string, error) {
 	reqURL := autoscan.JoinURL(c.baseURL)
-	req, err := http.NewRequest("GET", reqURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, reqURL, http.NoBody)
 	if err != nil {
-		return "", fmt.Errorf("failed creating version request: %v: %w", err, autoscan.ErrFatal)
+		return "", fmt.Errorf("failed creating version request: %w: %w", err, autoscan.ErrFatal)
 	}
 
 	res, err := c.do(req)
@@ -73,17 +79,19 @@ func (c apiClient) Version() (string, error) {
 		return "", fmt.Errorf("version: %w", err)
 	}
 
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
+
+	type plexVersionContainer struct {
+		Version string `json:"version"`
+	}
 
 	type Response struct {
-		MediaContainer struct {
-			Version string
-		}
+		MediaContainer plexVersionContainer `json:"MediaContainer"`
 	}
 
 	resp := new(Response)
 	if err := json.NewDecoder(res.Body).Decode(resp); err != nil {
-		return "", fmt.Errorf("failed decoding version response: %v: %w", err, autoscan.ErrFatal)
+		return "", fmt.Errorf("failed decoding version response: %w: %w", err, autoscan.ErrFatal)
 	}
 
 	return resp.MediaContainer.Version, nil
@@ -97,9 +105,9 @@ type library struct {
 
 func (c apiClient) Libraries() ([]library, error) {
 	reqURL := autoscan.JoinURL(c.baseURL, "library", "sections")
-	req, err := http.NewRequest("GET", reqURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, reqURL, http.NoBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed creating libraries request: %v: %w", err, autoscan.ErrFatal)
+		return nil, fmt.Errorf("failed creating libraries request: %w: %w", err, autoscan.ErrFatal)
 	}
 
 	res, err := c.do(req)
@@ -107,23 +115,29 @@ func (c apiClient) Libraries() ([]library, error) {
 		return nil, fmt.Errorf("libraries: %w", err)
 	}
 
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
+
+	type plexLocation struct {
+		Path string `json:"path"`
+	}
+
+	type plexDirectory struct {
+		ID       int            `json:"key,string"`
+		Name     string         `json:"title"`
+		Sections []plexLocation `json:"Location"`
+	}
+
+	type plexMediaContainer struct {
+		Libraries []plexDirectory `json:"Directory"`
+	}
 
 	type Response struct {
-		MediaContainer struct {
-			Libraries []struct {
-				ID       int    `json:"key,string"`
-				Name     string `json:"title"`
-				Sections []struct {
-					Path string `json:"path"`
-				} `json:"Location"`
-			} `json:"Directory"`
-		} `json:"MediaContainer"`
+		MediaContainer plexMediaContainer `json:"MediaContainer"`
 	}
 
 	resp := new(Response)
 	if err := json.NewDecoder(res.Body).Decode(resp); err != nil {
-		return nil, fmt.Errorf("failed decoding libraries response: %v: %w", err, autoscan.ErrFatal)
+		return nil, fmt.Errorf("failed decoding libraries response: %w: %w", err, autoscan.ErrFatal)
 	}
 
 	// process response
@@ -133,7 +147,7 @@ func (c apiClient) Libraries() ([]library, error) {
 			libPath := folder.Path
 
 			// Add trailing slash if there is none.
-			if len(libPath) > 0 && libPath[len(libPath)-1] != '/' {
+			if libPath != "" && libPath[len(libPath)-1] != '/' {
 				libPath += "/"
 			}
 
@@ -150,9 +164,9 @@ func (c apiClient) Libraries() ([]library, error) {
 
 func (c apiClient) Scan(path string, libraryID int) error {
 	reqURL := autoscan.JoinURL(c.baseURL, "library", "sections", strconv.Itoa(libraryID), "refresh")
-	req, err := http.NewRequest("GET", reqURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, reqURL, http.NoBody)
 	if err != nil {
-		return fmt.Errorf("failed creating scan request: %v: %w", err, autoscan.ErrFatal)
+		return fmt.Errorf("failed creating scan request: %w: %w", err, autoscan.ErrFatal)
 	}
 
 	q := url.Values{}
@@ -164,6 +178,6 @@ func (c apiClient) Scan(path string, libraryID int) error {
 		return fmt.Errorf("scan: %w", err)
 	}
 
-	res.Body.Close()
+	_ = res.Body.Close()
 	return nil
 }

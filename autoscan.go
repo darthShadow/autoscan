@@ -1,11 +1,10 @@
+// Package autoscan provides core types and utilities for the autoscan media scanner.
 package autoscan
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 )
 
 // A Scan is at the core of Autoscan.
@@ -19,8 +18,10 @@ type Scan struct {
 	Time         int64 // Unix timestamp
 }
 
+// ProcessorFunc is a callback that receives one or more media scans for processing.
 type ProcessorFunc func(...Scan) error
 
+// Trigger is a function that runs a background process and calls the given ProcessorFunc when scans are detected.
 type Trigger func(ProcessorFunc)
 
 // A HTTPTrigger is a Trigger which does not run in the background,
@@ -31,6 +32,8 @@ type HTTPTrigger func(ProcessorFunc) http.Handler
 
 // A Target receives a Scan from the Processor and translates the Scan
 // into a format understood by the target.
+//
+//nolint:iface // Target is the core public contract; all target packages implement it externally
 type Target interface {
 	Scan(Scan) error
 	Available() error
@@ -71,92 +74,3 @@ var (
 	// until all anchors are available.
 	ErrAnchorUnavailable = errors.New("anchor file is unavailable")
 )
-
-type Rewrite struct {
-	From string `yaml:"from"`
-	To   string `yaml:"to"`
-}
-
-type Rewriter func(string) string
-
-func NewRewriter(rewriteRules []Rewrite) (Rewriter, error) {
-	var rewrites []regexp.Regexp
-	for _, rule := range rewriteRules {
-		re, err := regexp.Compile(rule.From)
-		if err != nil {
-			return nil, err
-		}
-
-		rewrites = append(rewrites, *re)
-	}
-
-	rewriter := func(input string) string {
-		for i, r := range rewrites {
-			if r.MatchString(input) {
-				return r.ReplaceAllString(input, rewriteRules[i].To)
-			}
-		}
-
-		return input
-	}
-
-	return rewriter, nil
-}
-
-type Filterer func(string) bool
-
-func NewFilterer(includes []string, excludes []string) (Filterer, error) {
-	reIncludes := make([]regexp.Regexp, 0)
-	reExcludes := make([]regexp.Regexp, 0)
-
-	// compile patterns
-	for _, pattern := range includes {
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return nil, fmt.Errorf("compiling include: %v: %w", pattern, err)
-		}
-		reIncludes = append(reIncludes, *re)
-	}
-
-	for _, pattern := range excludes {
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return nil, fmt.Errorf("compiling exclude: %v: %w", pattern, err)
-		}
-		reExcludes = append(reExcludes, *re)
-	}
-
-	incSize := len(reIncludes)
-	excSize := len(reExcludes)
-
-	// create filterer
-	var fn Filterer = func(string) bool { return true }
-
-	if incSize > 0 || excSize > 0 {
-		fn = func(path string) bool {
-			// check excludes
-			for _, re := range reExcludes {
-				if re.MatchString(path) {
-					return false
-				}
-			}
-
-			// no includes (but excludes did not match)
-			if incSize == 0 {
-				return true
-			}
-
-			// check includes
-			for _, re := range reIncludes {
-				if re.MatchString(path) {
-					return true
-				}
-			}
-
-			// no includes passed
-			return false
-		}
-	}
-
-	return fn, nil
-}

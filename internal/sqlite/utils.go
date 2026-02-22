@@ -4,6 +4,8 @@ import (
 	"runtime"
 )
 
+const maxSQLiteConnections = 8
+
 // suggestConnectionCount calculates the optimal number
 // of parallel connections to the database.
 // Source: https://github.com/nalgeon/redka/blob/017c0b28f7685311c3948b2e6a531012c8092bd3/internal/sqlx/db.go#L225
@@ -15,8 +17,8 @@ func suggestConnectionCount() int {
 	switch {
 	case cpuCount < 2:
 		return 2
-	case cpuCount > 8:
-		return 8
+	case cpuCount > maxSQLiteConnections:
+		return maxSQLiteConnections
 	default:
 		return cpuCount
 	}

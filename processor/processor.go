@@ -8,12 +8,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/cloudbox/autoscan"
 	"github.com/cloudbox/autoscan/internal/sqlite"
-
-	"golang.org/x/sync/errgroup"
 )
 
+// Config holds configuration for the Processor.
 type Config struct {
 	Anchors    []string
 	MinimumAge time.Duration
@@ -21,6 +22,7 @@ type Config struct {
 	Db *sqlite.DB
 }
 
+// New creates a Processor from the given Config.
 func New(c Config) (*Processor, error) {
 	store, err := newDatastore(c.Db)
 	if err != nil {
@@ -36,6 +38,7 @@ func New(c Config) (*Processor, error) {
 	return proc, nil
 }
 
+// Processor dequeues scans and dispatches them to media server targets.
 type Processor struct {
 	anchors    []string
 	minimumAge time.Duration
@@ -45,6 +48,7 @@ type Processor struct {
 	processMu  sync.Mutex // Protects against concurrent Process() calls
 }
 
+// Add enqueues one or more scans for processing.
 func (p *Processor) Add(scans ...autoscan.Scan) error {
 	return p.store.Upsert(scans)
 }
@@ -63,7 +67,7 @@ const processorTimeout = 90 * time.Second
 
 // CheckAvailability checks whether all targets are available.
 // If one target is not available, the error will return.
-func (p *Processor) CheckAvailability(targets []autoscan.Target) error {
+func (*Processor) CheckAvailability(targets []autoscan.Target) error {
 	ctx, cancel := context.WithTimeout(context.Background(), processorTimeout)
 	defer cancel()
 
@@ -75,10 +79,13 @@ func (p *Processor) CheckAvailability(targets []autoscan.Target) error {
 		})
 	}
 
-	return g.Wait()
+	if err := g.Wait(); err != nil {
+		return fmt.Errorf("check target availability: %w", err)
+	}
+	return nil
 }
 
-func (p *Processor) callTargets(targets []autoscan.Target, scan autoscan.Scan) error {
+func (*Processor) callTargets(targets []autoscan.Target, scan autoscan.Scan) error {
 	ctx, cancel := context.WithTimeout(context.Background(), processorTimeout)
 	defer cancel()
 
@@ -90,9 +97,13 @@ func (p *Processor) callTargets(targets []autoscan.Target, scan autoscan.Scan) e
 		})
 	}
 
-	return g.Wait()
+	if err := g.Wait(); err != nil {
+		return fmt.Errorf("call targets: %w", err)
+	}
+	return nil
 }
 
+// Process picks the next available scan and dispatches it to all targets.
 func (p *Processor) Process(targets []autoscan.Target) error {
 	// Protect against concurrent processing to prevent duplicate scan processing
 	p.processMu.Lock()
@@ -127,7 +138,10 @@ func (p *Processor) Process(targets []autoscan.Target) error {
 
 // Close closes the database connections
 func (p *Processor) Close() error {
-	return p.db.Close()
+	if err := p.db.Close(); err != nil {
+		return fmt.Errorf("close processor db: %w", err)
+	}
+	return nil
 }
 
 var fileExists = func(fileName string) bool {

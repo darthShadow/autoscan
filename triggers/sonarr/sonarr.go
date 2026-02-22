@@ -1,7 +1,10 @@
+// Package sonarr provides an autoscan trigger for Sonarr webhooks.
 package sonarr
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"path"
 	"strings"
@@ -12,6 +15,7 @@ import (
 	"github.com/cloudbox/autoscan"
 )
 
+// Config holds configuration for the Sonarr trigger.
 type Config struct {
 	Name      string             `yaml:"name"`
 	Priority  int                `yaml:"priority"`
@@ -23,7 +27,7 @@ type Config struct {
 func New(c Config) (autoscan.HTTPTrigger, error) {
 	rewriter, err := autoscan.NewRewriter(c.Rewrite)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create rewriter: %w", err)
 	}
 
 	trigger := func(callback autoscan.ProcessorFunc) http.Handler {
@@ -43,33 +47,34 @@ type handler struct {
 	callback autoscan.ProcessorFunc
 }
 
-type sonarrEvent struct {
-	Type string `json:"eventType"`
-
-	File struct {
-		RelativePath string
-	} `json:"episodeFile"`
-
-	Series struct {
-		Path string
-	} `json:"series"`
-
-	RenamedFiles []struct {
-		// use PreviousPath as the Series.Path might have changed.
-		PreviousPath string
-		RelativePath string
-	} `json:"renamedEpisodeFiles"`
+type sonarrFile struct {
+	RelativePath string `json:"relativePath"`
 }
 
-func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	var err error
+type sonarrSeries struct {
+	Path string `json:"path"`
+}
+
+type sonarrRenamedFile struct {
+	// use PreviousPath as the Series.Path might have changed.
+	PreviousPath string `json:"previousPath"`
+	RelativePath string `json:"relativePath"`
+}
+
+type sonarrEvent struct {
+	Type         string              `json:"eventType"`
+	File         sonarrFile          `json:"episodeFile"`
+	Series       sonarrSeries        `json:"series"`
+	RenamedFiles []sonarrRenamedFile `json:"renamedEpisodeFiles"`
+}
+
+func (h handler) ServeHTTP(writer http.ResponseWriter, r *http.Request) {
 	rlog := hlog.FromRequest(r)
 
 	event := new(sonarrEvent)
-	err = json.NewDecoder(r.Body).Decode(event)
-	if err != nil {
+	if err := json.NewDecoder(r.Body).Decode(event); err != nil {
 		rlog.Error().Err(err).Msg("Request Decode Failed")
-		rw.WriteHeader(http.StatusBadRequest)
+		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -77,89 +82,46 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	if strings.EqualFold(event.Type, "Test") {
 		rlog.Info().Msg("Test Event")
-		rw.WriteHeader(http.StatusOK)
+		writer.WriteHeader(http.StatusOK)
 		return
 	}
 
-	paths := make(map[string]string)
+	var (
+		paths map[string]string
+		err   error
+	)
 
-	// a Download event is either an upgrade or a new file.
-	// the EpisodeFileDelete event shares the same request format as Download.
-	if strings.EqualFold(event.Type, "Download") || strings.EqualFold(event.Type, "EpisodeFileDelete") {
-		if event.File.RelativePath == "" || event.Series.Path == "" {
-			rlog.Error().Msg("Required Fields Missing")
-			rw.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		// Use path.Dir to get the directory in which the file is located
-		folderPath := path.Dir(path.Join(event.Series.Path, event.File.RelativePath))
-		// Use path.Base to get the filename
-		filePath := path.Base(path.Join(event.Series.Path, event.File.RelativePath))
-		paths[folderPath] = filePath
+	switch {
+	case strings.EqualFold(event.Type, "Download") || strings.EqualFold(event.Type, "EpisodeFileDelete"):
+		paths, err = pathsForDownload(event)
+	case strings.EqualFold(event.Type, "SeriesDelete"):
+		paths, err = pathsForSeriesDelete(event)
+	case strings.EqualFold(event.Type, "Rename"):
+		paths, err = pathsForRename(event)
+	default:
+		// unknown event type — nothing to scan
 	}
 
-	// An entire show has been deleted
-	if strings.EqualFold(event.Type, "SeriesDelete") {
-		if event.Series.Path == "" {
-			rlog.Error().Msg("Required Fields Missing")
-			rw.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		// Scan the folder of the show
-		paths[event.Series.Path] = ""
-	}
-
-	if strings.EqualFold(event.Type, "Rename") {
-		if event.Series.Path == "" {
-			rlog.Error().Msg("Required Fields Missing")
-			rw.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		// Keep track of which paths we have already added to paths.
-		encountered := make(map[string]bool)
-
-		for _, renamedFile := range event.RenamedFiles {
-			previousPath := path.Dir(renamedFile.PreviousPath)
-			previousFile := path.Base(renamedFile.PreviousPath)
-			currentPath := path.Dir(path.Join(event.Series.Path, renamedFile.RelativePath))
-			currentFile := path.Base(path.Join(event.Series.Path, renamedFile.RelativePath))
-
-			// if previousPath not in paths, then add it.
-			if _, ok := encountered[previousPath]; !ok {
-				encountered[previousPath] = true
-				paths[previousPath] = previousFile
-			}
-
-			// if currentPath not in paths, then add it.
-			if _, ok := encountered[currentPath]; !ok {
-				encountered[currentPath] = true
-				paths[currentPath] = currentFile
-			}
-		}
+	if err != nil {
+		rlog.Error().Err(err).Msg("Required Fields Missing")
+		writer.WriteHeader(http.StatusBadRequest)
+		return
 	}
 
 	var scans []autoscan.Scan
 
 	for folderPath, filePath := range paths {
-		folderPath := h.rewrite(folderPath)
-
-		scan := autoscan.Scan{
-			Folder:       folderPath,
+		scans = append(scans, autoscan.Scan{
+			Folder:       h.rewrite(folderPath),
 			RelativePath: filePath,
 			Priority:     h.priority,
 			Time:         now().Unix(),
-		}
-
-		scans = append(scans, scan)
+		})
 	}
 
-	err = h.callback(scans...)
-	if err != nil {
+	if err = h.callback(scans...); err != nil {
 		rlog.Error().Err(err).Msg("Scan Enqueue Failed")
-		rw.WriteHeader(http.StatusInternalServerError)
+		writer.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
@@ -170,7 +132,59 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 			Msg("Scan Enqueued")
 	}
 
-	rw.WriteHeader(http.StatusOK)
+	writer.WriteHeader(http.StatusOK)
+}
+
+// pathsForDownload returns the folder→file mapping for Download and EpisodeFileDelete events.
+// A Download event covers both new files and upgrades.
+func pathsForDownload(event *sonarrEvent) (map[string]string, error) {
+	if event.File.RelativePath == "" || event.Series.Path == "" {
+		return nil, errors.New("required fields missing")
+	}
+
+	// Use path.Dir to get the directory in which the file is located.
+	// Use path.Base to get the filename.
+	full := path.Join(event.Series.Path, event.File.RelativePath)
+	return map[string]string{path.Dir(full): path.Base(full)}, nil
+}
+
+// pathsForSeriesDelete returns the series root folder for a SeriesDelete event.
+func pathsForSeriesDelete(event *sonarrEvent) (map[string]string, error) {
+	if event.Series.Path == "" {
+		return nil, errors.New("required fields missing")
+	}
+
+	return map[string]string{event.Series.Path: ""}, nil
+}
+
+// pathsForRename returns all affected folder→file mappings for a Rename event.
+// Both previous and current paths are included; duplicates are dropped.
+func pathsForRename(event *sonarrEvent) (map[string]string, error) {
+	if event.Series.Path == "" {
+		return nil, errors.New("required fields missing")
+	}
+
+	paths := make(map[string]string)
+	encountered := make(map[string]bool)
+
+	for _, renamedFile := range event.RenamedFiles {
+		previousPath := path.Dir(renamedFile.PreviousPath)
+		previousFile := path.Base(renamedFile.PreviousPath)
+		currentPath := path.Dir(path.Join(event.Series.Path, renamedFile.RelativePath))
+		currentFile := path.Base(path.Join(event.Series.Path, renamedFile.RelativePath))
+
+		if _, ok := encountered[previousPath]; !ok {
+			encountered[previousPath] = true
+			paths[previousPath] = previousFile
+		}
+
+		if _, ok := encountered[currentPath]; !ok {
+			encountered[currentPath] = true
+			paths[currentPath] = currentFile
+		}
+	}
+
+	return paths, nil
 }
 
 var now = time.Now

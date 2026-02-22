@@ -1,3 +1,4 @@
+// Package migrate provides SQL migration support for autoscan's embedded migration files.
 package migrate
 
 import (
@@ -8,6 +9,7 @@ import (
 	"github.com/oriser/regroup"
 )
 
+// Migrator applies SQL migrations from an embedded filesystem to a database.
 type Migrator struct {
 	db  *sql.DB
 	dir string
@@ -17,28 +19,30 @@ type Migrator struct {
 
 /* Credits to https://github.com/Boostport/migration */
 
+// New creates a Migrator for the given database and migration directory prefix.
 func New(db *sql.DB, dir string) (*Migrator, error) {
 	var err error
 
-	m := &Migrator{
+	migr := &Migrator{
 		db:  db,
 		dir: dir,
 	}
 
 	// verify schema
-	if err = m.verify(); err != nil {
+	if err = migr.verify(); err != nil {
 		return nil, fmt.Errorf("verify: %w", err)
 	}
 
 	// compile migration regexp
-	m.re, err = regroup.Compile(`(?P<Version>\d+)\w?(?P<Name>.+)?\.sql`)
+	migr.re, err = regroup.Compile(`(?P<Version>\d+)\w?(?P<Name>.+)?\.sql`)
 	if err != nil {
 		return nil, fmt.Errorf("regexp: %w", err)
 	}
 
-	return m, nil
+	return migr, nil
 }
 
+// Migrate applies all pending up-migrations from the embedded FS for the given component.
 func (m *Migrator) Migrate(fs *embed.FS, component string) error {
 	// parse migrations
 	migrations, err := m.parse(fs)

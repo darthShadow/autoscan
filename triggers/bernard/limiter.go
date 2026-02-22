@@ -2,6 +2,7 @@ package bernard
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -26,7 +27,10 @@ func (r *rateLimiter) Wait(ctx context.Context) {
 }
 
 func (r *rateLimiter) Acquire(ctx context.Context, n int64) error {
-	return r.sem.Acquire(ctx, n)
+	if err := r.sem.Acquire(ctx, n); err != nil {
+		return fmt.Errorf("acquire semaphore: %w", err)
+	}
+	return nil
 }
 
 func (r *rateLimiter) Release(n int64) {

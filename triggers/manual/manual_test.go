@@ -178,7 +178,7 @@ func TestHandler(t *testing.T) {
 				if !reflect.DeepEqual(tc.Expected.Scans, scans) {
 					t.Logf("want: %v", tc.Expected.Scans)
 					t.Logf("got:  %v", scans)
-					t.Errorf("Scans do not equal")
+					t.Error("Scans do not equal")
 					return errors.New("Scans do not equal")
 				}
 
@@ -193,7 +193,7 @@ func TestHandler(t *testing.T) {
 			server := httptest.NewServer(trigger(callback))
 			defer server.Close()
 
-			req, err := http.NewRequest("POST", server.URL, nil)
+			req, err := http.NewRequest(http.MethodPost, server.URL, http.NoBody)
 			if err != nil {
 				t.Fatalf("Failed creating request: %v", err)
 			}
@@ -205,7 +205,7 @@ func TestHandler(t *testing.T) {
 				t.Fatalf("Request failed: %v", err)
 			}
 
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			if res.StatusCode != tc.Expected.StatusCode {
 				t.Errorf("Status codes do not match: %d vs %d", res.StatusCode, tc.Expected.StatusCode)
 			}

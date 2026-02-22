@@ -1,3 +1,4 @@
+// Package bernard provides an autoscan trigger for Google Drive via the Bernard library.
 package bernard
 
 import (
@@ -19,10 +20,12 @@ import (
 )
 
 const (
-	maxSyncRetries      = 5
-	syncWatchdogTimeout = 30 * time.Minute
+	maxSyncRetries        = 5
+	syncWatchdogTimeout   = 30 * time.Minute
+	syncSafeSleepDuration = 120 * time.Second
 )
 
+// Config holds configuration for the Bernard Google Drive trigger.
 type Config struct {
 	AccountPath  string             `yaml:"account"`
 	CronSchedule string             `yaml:"cron"`
@@ -32,62 +35,67 @@ type Config struct {
 	Rewrite      []autoscan.Rewrite `yaml:"rewrite"`
 	Include      []string           `yaml:"include"`
 	Exclude      []string           `yaml:"exclude"`
-	Drives       []struct {
-		ID         string             `yaml:"id"`
-		TimeOffset time.Duration      `yaml:"time-offset"`
-		Rewrite    []autoscan.Rewrite `yaml:"rewrite"`
-		Include    []string           `yaml:"include"`
-		Exclude    []string           `yaml:"exclude"`
-	} `yaml:"drives"`
+	Drives       []DriveConfig      `yaml:"drives"`
 }
 
-func New(c Config, db *sql.DB) (autoscan.Trigger, error) {
-	l := autoscan.GetLogger(c.Verbosity).With().
+// DriveConfig holds per-drive overrides for the bernard trigger.
+type DriveConfig struct {
+	ID         string             `yaml:"id"`
+	TimeOffset time.Duration      `yaml:"time-offset"`
+	Rewrite    []autoscan.Rewrite `yaml:"rewrite"`
+	Include    []string           `yaml:"include"`
+	Exclude    []string           `yaml:"exclude"`
+}
+
+// New creates a Bernard trigger that polls Google Drive for changes using the given config and database.
+func New(cfg Config, db *sql.DB) (autoscan.Trigger, error) {
+	logger := autoscan.GetLogger(cfg.Verbosity).With().
 		Str("trigger", "bernard").
 		Logger()
 
 	const scope = "https://www.googleapis.com/auth/drive.readonly"
-	auth, err := stubbs.FromFile(c.AccountPath, []string{scope})
+	auth, err := stubbs.FromFile(cfg.AccountPath, []string{scope})
 	if err != nil {
-		return nil, fmt.Errorf("%v: %w", err, autoscan.ErrFatal)
+		return nil, fmt.Errorf("%w: %w", err, autoscan.ErrFatal)
 	}
 
 	store, err := sqlite.FromDB(db)
 	if err != nil {
-		return nil, fmt.Errorf("%v: %w", err, autoscan.ErrFatal)
+		return nil, fmt.Errorf("%w: %w", err, autoscan.ErrFatal)
 	}
 
 	limiter, err := getRateLimiter(auth.Email())
 	if err != nil {
-		return nil, fmt.Errorf("%v: %w", err, autoscan.ErrFatal)
+		return nil, fmt.Errorf("%w: %w", err, autoscan.ErrFatal)
 	}
 
 	bernard := lowe.New(auth, store,
 		lowe.WithPreRequestHook(func() { limiter.Wait(context.Background()) }),
-		lowe.WithSafeSleep(120*time.Second))
+		lowe.WithSafeSleep(syncSafeSleepDuration))
 
 	var drives []drive
-	for _, d := range c.Drives {
-
-		rewriter, err := autoscan.NewRewriter(append(d.Rewrite, c.Rewrite...))
+	for _, driveCfg := range cfg.Drives {
+		rewriter, err := autoscan.NewRewriter(append(driveCfg.Rewrite, cfg.Rewrite...))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("create drive rewriter: %w", err)
 		}
 
-		filterer, err := autoscan.NewFilterer(append(d.Include, c.Include...), append(d.Exclude, c.Exclude...))
+		includes := append(driveCfg.Include, cfg.Include...)
+		excludes := append(driveCfg.Exclude, cfg.Exclude...)
+		filterer, err := autoscan.NewFilterer(includes, excludes)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("create drive filterer: %w", err)
 		}
 
 		scanTime := func() time.Time {
-			if d.TimeOffset.Seconds() > 0 {
-				return time.Now().Add(d.TimeOffset)
+			if driveCfg.TimeOffset.Seconds() > 0 {
+				return time.Now().Add(driveCfg.TimeOffset)
 			}
-			return time.Now().Add(c.TimeOffset)
+			return time.Now().Add(cfg.TimeOffset)
 		}
 
 		drives = append(drives, drive{
-			ID:       d.ID,
+			ID:       driveCfg.ID,
 			Rewriter: rewriter,
 			Allowed:  filterer,
 			ScanTime: scanTime,
@@ -95,11 +103,11 @@ func New(c Config, db *sql.DB) (autoscan.Trigger, error) {
 	}
 
 	trigger := func(callback autoscan.ProcessorFunc) {
-		d := daemon{
-			log:          l,
+		dmn := daemon{
+			log:          logger,
 			callback:     callback,
-			cronSchedule: c.CronSchedule,
-			priority:     c.Priority,
+			cronSchedule: cfg.CronSchedule,
+			priority:     cfg.Priority,
 			drives:       drives,
 			bernard:      bernard,
 			store:        &bds{store},
@@ -107,8 +115,8 @@ func New(c Config, db *sql.DB) (autoscan.Trigger, error) {
 		}
 
 		// start job(s)
-		if err := d.startAutoSync(); err != nil {
-			l.Error().
+		if err := dmn.startAutoSync(); err != nil {
+			logger.Error().
 				Err(err).
 				Msg("Cron Init Failed")
 			return
@@ -178,7 +186,7 @@ func (s *syncJob) Run() {
 		s.cron.Remove(s.jobID)
 		return
 
-	case err != nil:
+	default:
 		// an un-expected/un-handled error occurred, this should be retryable with the same retry logic
 		s.log.Warn().
 			Err(err).
@@ -226,103 +234,120 @@ func (d daemon) runSyncWithWatchdog(driveID string, syncFn func() error) error {
 }
 
 func (d daemon) startAutoSync() error {
-	c := cron.New()
+	cronInst := cron.New()
 
 	for _, drive := range d.drives {
-		fullSync := false
-		l := d.withDriveLog(drive.ID)
-
-		// full sync required?
-		_, err := d.store.PageToken(drive.ID)
-		switch {
-		case errors.Is(err, ds.ErrFullSync):
-			fullSync = true
-		case err != nil:
-			return fmt.Errorf("%v: determining if full sync required: %v: %w",
-				drive.ID, err, autoscan.ErrFatal)
+		if err := d.setupDrive(cronInst, drive); err != nil {
+			return err
 		}
-
-		// create job
-		job := newSyncJob(c, l, func() error {
-			// acquire lock
-			if err := d.limiter.Acquire(context.Background(), 1); err != nil {
-				return fmt.Errorf("%v: acquiring sync semaphore: %v: %w",
-					drive.ID, err, autoscan.ErrFatal)
-			}
-			defer d.limiter.Release(1)
-
-			// full sync
-			if fullSync {
-				return d.runSyncWithWatchdog(drive.ID, func() error {
-					l.Info().Msg("Full Sync Starting")
-					start := time.Now()
-
-					if err := d.bernard.FullSync(drive.ID); err != nil {
-						return fmt.Errorf("%v: performing full sync: %w", drive.ID, err)
-					}
-
-					l.Info().Dur("elapsed", time.Since(start)).Msg("Full Sync Finished")
-					fullSync = false
-					return nil
-				})
-			}
-
-			// create partial sync
-			dh, diff := d.store.NewDifferencesHook()
-			ph := NewPostProcessBernardDiff(drive.ID, d.store, diff)
-			ch, paths := NewPathsHook(drive.ID, d.store, diff)
-
-			return d.runSyncWithWatchdog(drive.ID, func() error {
-				l.Debug().Msg("Partial Sync Starting")
-				start := time.Now()
-
-				// do partial sync
-				err := d.bernard.PartialSync(drive.ID, dh, ph, ch)
-				if err != nil {
-					return fmt.Errorf("%v: performing partial sync: %w", drive.ID, err)
-				}
-
-				l.Debug().
-					Int("new", len(paths.NewFolders)).
-					Int("old", len(paths.OldFolders)).
-					Dur("elapsed", time.Since(start)).
-					Msg("Partial Sync Finished")
-
-				// translate paths to scan task
-				task := d.getScanTask(&(drive), paths)
-
-				// move scans to processor
-				if len(task.scans) > 0 {
-					l.Trace().
-						Interface("scans", task.scans).
-						Msg("Scans Enqueuing")
-
-					err := d.callback(task.scans...)
-					if err != nil {
-						return fmt.Errorf("%v: moving scans to processor: %v: %w",
-							drive.ID, err, autoscan.ErrFatal)
-					}
-
-					l.Info().
-						Int("added", task.added).
-						Int("removed", task.removed).
-						Msg("Scans Enqueued")
-				}
-
-				return nil
-			})
-		})
-
-		id, err := c.AddJob(d.cronSchedule, cron.NewChain(cron.SkipIfStillRunning(cron.DiscardLogger)).Then(job))
-		if err != nil {
-			return fmt.Errorf("%v: creating auto sync job for drive: %w", drive.ID, err)
-		}
-
-		job.jobID = id
 	}
 
-	c.Start()
+	cronInst.Start()
 	return nil
+}
+
+// setupDrive configures a single drive: determines whether a full sync is
+// needed, creates the cron job closure, and registers it with cronInst.
+func (d daemon) setupDrive(cronInst *cron.Cron, drive drive) error {
+	fullSync := false
+	driveLogger := d.withDriveLog(drive.ID)
+
+	// full sync required?
+	_, err := d.store.PageToken(drive.ID)
+	switch {
+	case errors.Is(err, ds.ErrFullSync):
+		fullSync = true
+	case err != nil:
+		return fmt.Errorf("%v: determining if full sync required: %w: %w",
+			drive.ID, err, autoscan.ErrFatal)
+	default:
+		// no error, incremental sync
+	}
+
+	// create job
+	job := newSyncJob(cronInst, driveLogger, func() error {
+		// acquire lock
+		if acquireErr := d.limiter.Acquire(context.Background(), 1); acquireErr != nil {
+			return fmt.Errorf("%v: acquiring sync semaphore: %w: %w",
+				drive.ID, acquireErr, autoscan.ErrFatal)
+		}
+		defer d.limiter.Release(1)
+
+		// full sync
+		if fullSync {
+			return d.runSyncWithWatchdog(drive.ID, func() error {
+				driveLogger.Info().Msg("Full Sync Starting")
+				start := time.Now()
+
+				if syncErr := d.bernard.FullSync(drive.ID); syncErr != nil {
+					return fmt.Errorf("%v: performing full sync: %w", drive.ID, syncErr)
+				}
+
+				driveLogger.Info().Dur("elapsed", time.Since(start)).Msg("Full Sync Finished")
+				fullSync = false
+				return nil
+			})
+		}
+
+		// partial sync
+		return d.runPartialSync(drive, driveLogger)
+	})
+
+	id, err := cronInst.AddJob(d.cronSchedule, cron.NewChain(cron.SkipIfStillRunning(cron.DiscardLogger)).Then(job))
+	if err != nil {
+		return fmt.Errorf("%v: creating auto sync job for drive: %w", drive.ID, err)
+	}
+
+	job.jobID = id
+	return nil
+}
+
+// runPartialSync runs one incremental sync for the given drive: fetches
+// differences via hooks, computes scan paths, and enqueues them.
+func (d daemon) runPartialSync(drive drive, driveLogger zerolog.Logger) error {
+	dh, diff := d.store.NewDifferencesHook()
+	ph := NewPostProcessBernardDiff(drive.ID, d.store, diff)
+	ch, paths := NewPathsHook(drive.ID, d.store, diff)
+
+	return d.runSyncWithWatchdog(drive.ID, func() error {
+		driveLogger.Debug().Msg("Partial Sync Starting")
+		start := time.Now()
+
+		// do partial sync
+		syncErr := d.bernard.PartialSync(drive.ID, dh, ph, ch)
+		if syncErr != nil {
+			return fmt.Errorf("%v: performing partial sync: %w", drive.ID, syncErr)
+		}
+
+		driveLogger.Debug().
+			Int("new", len(paths.NewFolders)).
+			Int("old", len(paths.OldFolders)).
+			Dur("elapsed", time.Since(start)).
+			Msg("Partial Sync Finished")
+
+		// translate paths to scan task
+		task := d.getScanTask(&drive, paths)
+
+		// move scans to processor
+		if len(task.scans) > 0 {
+			driveLogger.Trace().
+				Interface("scans", task.scans).
+				Msg("Scans Enqueuing")
+
+			callbackErr := d.callback(task.scans...)
+			if callbackErr != nil {
+				return fmt.Errorf("%v: moving scans to processor: %w: %w",
+					drive.ID, callbackErr, autoscan.ErrFatal)
+			}
+
+			driveLogger.Info().
+				Int("added", task.added).
+				Int("removed", task.removed).
+				Msg("Scans Enqueued")
+		}
+
+		return nil
+	})
 }
 
 type scanTask struct {

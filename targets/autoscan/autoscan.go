@@ -1,6 +1,7 @@
 package autoscan
 
 import (
+	"fmt"
 	"path"
 
 	"github.com/rs/zerolog"
@@ -8,10 +9,11 @@ import (
 	"github.com/cloudbox/autoscan"
 )
 
+// Config holds configuration for the autoscan target.
 type Config struct {
 	URL       string             `yaml:"url"`
 	User      string             `yaml:"username"`
-	Pass      string             `yaml:"password"`
+	Pass      string             `yaml:"password"` //nolint:gosec // user-provided credential, not a hardcoded secret
 	Rewrite   []autoscan.Rewrite `yaml:"rewrite"`
 	Verbosity string             `yaml:"verbosity"`
 }
@@ -26,24 +28,25 @@ type target struct {
 	api     apiClient
 }
 
-func New(c Config) (autoscan.Target, error) {
-	l := autoscan.GetLogger(c.Verbosity).With().
+// New creates an autoscan target that proxies scans to another autoscan instance.
+func New(cfg Config) (autoscan.Target, error) {
+	logger := autoscan.GetLogger(cfg.Verbosity).With().
 		Str("target", "autoscan").
-		Str("url", c.URL).Logger()
+		Str("url", cfg.URL).Logger()
 
-	rewriter, err := autoscan.NewRewriter(c.Rewrite)
+	rewriter, err := autoscan.NewRewriter(cfg.Rewrite)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create rewriter: %w", err)
 	}
 
 	return &target{
-		url:  c.URL,
-		user: c.User,
-		pass: c.Pass,
+		url:  cfg.URL,
+		user: cfg.User,
+		pass: cfg.Pass,
 
-		log:     l,
+		log:     logger,
 		rewrite: rewriter,
-		api:     newAPIClient(c.URL, c.User, c.Pass, l),
+		api:     newAPIClient(cfg.URL, cfg.User, cfg.Pass, logger),
 	}, nil
 }
 
@@ -56,18 +59,18 @@ func (t target) Scan(scan autoscan.Scan) error {
 	}
 
 	// send scan request
-	l := t.log.With().
+	logger := t.log.With().
 		Str("folder", scanFolder).
 		Str("path", scanPath).
 		Logger()
 
-	l.Debug().Msg("Scan Sending")
+	logger.Debug().Msg("Scan Sending")
 
 	if err := t.api.Scan(scanFolder, scanPath); err != nil {
 		return err
 	}
 
-	l.Info().Msg("Scan Sent")
+	logger.Info().Msg("Scan Sent")
 	return nil
 }
 

@@ -1,7 +1,9 @@
+// Package manual provides an autoscan trigger for manual HTTP scan requests.
 package manual
 
 import (
 	_ "embed"
+	"fmt"
 	"net/http"
 	"path"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/cloudbox/autoscan"
 )
 
+// Config holds configuration for the manual trigger.
 type Config struct {
 	Rewrite   []autoscan.Rewrite `yaml:"rewrite"`
 	Priority  int                `yaml:"priority"`
@@ -24,7 +27,7 @@ var template []byte
 func New(c Config) (autoscan.HTTPTrigger, error) {
 	rewriter, err := autoscan.NewRewriter(c.Rewrite)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create rewriter: %w", err)
 	}
 
 	trigger := func(callback autoscan.ProcessorFunc) http.Handler {
@@ -44,18 +47,18 @@ type handler struct {
 	callback autoscan.ProcessorFunc
 }
 
-func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+func (h handler) ServeHTTP(writer http.ResponseWriter, r *http.Request) {
 	rlog := hlog.FromRequest(r)
 
 	query := r.URL.Query()
 
 	switch r.Method {
-	case "GET":
-		rw.Header().Set("Content-Type", "text/html")
-		_, _ = rw.Write(template)
+	case http.MethodGet:
+		writer.Header().Set("Content-Type", "text/html")
+		_, _ = writer.Write(template)
 		return
-	case "HEAD":
-		rw.WriteHeader(http.StatusOK)
+	case http.MethodHead:
+		writer.WriteHeader(http.StatusOK)
 		return
 	}
 
@@ -63,7 +66,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	paths := query["path"]
 	if len(directories) == 0 && len(paths) == 0 {
 		rlog.Error().Msg("Empty Request")
-		rw.WriteHeader(http.StatusBadRequest)
+		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -94,17 +97,16 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 			Priority:     h.priority,
 			Time:         now().Unix(),
 		})
-
 	}
 
 	err := h.callback(scans...)
 	if err != nil {
 		rlog.Error().Err(err).Msg("Scan Enqueue Failed")
-		rw.WriteHeader(http.StatusInternalServerError)
+		writer.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	rw.WriteHeader(http.StatusOK)
+	writer.WriteHeader(http.StatusOK)
 	for _, scan := range scans {
 		rlog.Info().
 			Str("path", scan.Folder).

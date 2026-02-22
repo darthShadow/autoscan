@@ -1,6 +1,8 @@
+// Package autoscan provides an autoscan target that forwards scans to another autoscan instance.
 package autoscan
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -19,7 +21,7 @@ type apiClient struct {
 	pass    string
 }
 
-func newAPIClient(baseURL string, user string, pass string, log zerolog.Logger) apiClient {
+func newAPIClient(baseURL, user, pass string, log zerolog.Logger) apiClient {
 	return apiClient{
 		client:  httpclient.New(),
 		log:     log,
@@ -30,9 +32,9 @@ func newAPIClient(baseURL string, user string, pass string, log zerolog.Logger) 
 }
 
 func (c apiClient) do(req *http.Request) (*http.Response, error) {
-	res, err := c.client.Do(req)
+	res, err := c.client.Do(req) //nolint:gosec // URL is user-configured in app config, SSRF is intentional
 	if err != nil {
-		return nil, fmt.Errorf("%v: %w", err, autoscan.ErrTargetUnavailable)
+		return nil, fmt.Errorf("%w: %w", err, autoscan.ErrTargetUnavailable)
 	}
 
 	if res.StatusCode >= 200 && res.StatusCode < 300 {
@@ -46,12 +48,16 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 		Msg("Request failed")
 
 	// statusCode not in the 2xx range, close response
-	res.Body.Close()
+	_ = res.Body.Close()
 
 	switch res.StatusCode {
-	case 401:
+	case http.StatusUnauthorized:
 		return nil, fmt.Errorf("invalid basic auth: %s: %w", res.Status, autoscan.ErrFatal)
-	case 404, 500, 502, 503, 504:
+	case http.StatusNotFound,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
 		return nil, fmt.Errorf("%s: %w", res.Status, autoscan.ErrTargetUnavailable)
 	default:
 		return nil, fmt.Errorf("%s: %w", res.Status, autoscan.ErrFatal)
@@ -60,9 +66,10 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 
 func (c apiClient) Available() error {
 	// create request
-	req, err := http.NewRequest("HEAD", autoscan.JoinURL(c.baseURL, "triggers", "manual"), nil)
+	triggerURL := autoscan.JoinURL(c.baseURL, "triggers", "manual")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodHead, triggerURL, http.NoBody)
 	if err != nil {
-		return fmt.Errorf("failed creating head request: %v: %w", err, autoscan.ErrFatal)
+		return fmt.Errorf("failed creating head request: %w: %w", err, autoscan.ErrFatal)
 	}
 
 	if c.user != "" && c.pass != "" {
@@ -75,15 +82,16 @@ func (c apiClient) Available() error {
 		return fmt.Errorf("availability: %w", err)
 	}
 
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	return nil
 }
 
-func (c apiClient) Scan(folder string, path string) error {
+func (c apiClient) Scan(folder, path string) error {
 	// create request
-	req, err := http.NewRequest("POST", autoscan.JoinURL(c.baseURL, "triggers", "manual"), nil)
+	triggerURL := autoscan.JoinURL(c.baseURL, "triggers", "manual")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, triggerURL, http.NoBody)
 	if err != nil {
-		return fmt.Errorf("failed creating scan request: %v: %w", err, autoscan.ErrFatal)
+		return fmt.Errorf("failed creating scan request: %w: %w", err, autoscan.ErrFatal)
 	}
 
 	if c.user != "" && c.pass != "" {
@@ -106,6 +114,6 @@ func (c apiClient) Scan(folder string, path string) error {
 		return fmt.Errorf("scan: %w", err)
 	}
 
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	return nil
 }

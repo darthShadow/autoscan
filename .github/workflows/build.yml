@@ -75,6 +75,10 @@ jobs:
         run: |
           task vendor
 
+      # lint
+      - name: lint
+        run: task lint
+
       # test
       - name: tests
         run: |

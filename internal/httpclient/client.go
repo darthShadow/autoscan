@@ -1,3 +1,4 @@
+// Package httpclient provides an HTTP client factory with configurable timeouts.
 package httpclient
 
 import (

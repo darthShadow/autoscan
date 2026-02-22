@@ -1,3 +1,4 @@
+// Package inotify provides an autoscan trigger based on filesystem change notifications.
 package inotify
 
 import (
@@ -14,18 +15,22 @@ import (
 	"github.com/cloudbox/autoscan"
 )
 
+// Config holds configuration for the inotify trigger.
 type Config struct {
 	Priority  int                `yaml:"priority"`
 	Verbosity string             `yaml:"verbosity"`
 	Rewrite   []autoscan.Rewrite `yaml:"rewrite"`
 	Include   []string           `yaml:"include"`
 	Exclude   []string           `yaml:"exclude"`
-	Paths     []struct {
-		Path    string             `yaml:"path"`
-		Rewrite []autoscan.Rewrite `yaml:"rewrite"`
-		Include []string           `yaml:"include"`
-		Exclude []string           `yaml:"exclude"`
-	} `yaml:"paths"`
+	Paths     []PathConfig       `yaml:"paths"`
+}
+
+// PathConfig holds per-path overrides for the inotify trigger.
+type PathConfig struct {
+	Path    string             `yaml:"path"`
+	Rewrite []autoscan.Rewrite `yaml:"rewrite"`
+	Include []string           `yaml:"include"`
+	Exclude []string           `yaml:"exclude"`
 }
 
 type daemon struct {
@@ -42,26 +47,28 @@ type path struct {
 	Allowed  autoscan.Filterer
 }
 
-func New(c Config) (autoscan.Trigger, error) {
-	l := autoscan.GetLogger(c.Verbosity).With().
+// New creates an inotify-based autoscan trigger that watches the configured paths.
+func New(cfg Config) (autoscan.Trigger, error) {
+	logger := autoscan.GetLogger(cfg.Verbosity).With().
 		Str("trigger", "inotify").
 		Logger()
 
 	var paths []path
-	for _, p := range c.Paths {
-
-		rewriter, err := autoscan.NewRewriter(append(p.Rewrite, c.Rewrite...))
+	for _, pathConfig := range cfg.Paths {
+		rewriter, err := autoscan.NewRewriter(append(pathConfig.Rewrite, cfg.Rewrite...))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("create path rewriter: %w", err)
 		}
 
-		filterer, err := autoscan.NewFilterer(append(p.Include, c.Include...), append(p.Exclude, c.Exclude...))
+		includes := append(pathConfig.Include, cfg.Include...)
+		excludes := append(pathConfig.Exclude, cfg.Exclude...)
+		filterer, err := autoscan.NewFilterer(includes, excludes)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("create path filterer: %w", err)
 		}
 
 		paths = append(paths, path{
-			Path:     p.Path,
+			Path:     pathConfig.Path,
 			Rewriter: rewriter,
 			Allowed:  filterer,
 		})
@@ -69,15 +76,15 @@ func New(c Config) (autoscan.Trigger, error) {
 
 	trigger := func(callback autoscan.ProcessorFunc) {
 		d := daemon{
-			log:      l,
+			log:      logger,
 			callback: callback,
 			paths:    paths,
-			queue:    newQueue(callback, l, c.Priority),
+			queue:    newQueue(callback, logger, cfg.Priority),
 		}
 
 		// start job(s)
 		if err := d.startMonitoring(); err != nil {
-			l.Error().
+			logger.Error().
 				Err(err).
 				Msg("Jobs Init Failed")
 			return
@@ -99,7 +106,7 @@ func (d *daemon) startMonitoring() error {
 	for _, p := range d.paths {
 		if err := filepath.Walk(p.Path, d.walkFunc); err != nil {
 			_ = d.watcher.Close()
-			return err
+			return fmt.Errorf("walk path %s: %w", p.Path, err)
 		}
 	}
 
@@ -143,7 +150,7 @@ func (d *daemon) getPathObject(path string) (*path, error) {
 
 func (d *daemon) worker() {
 	// close watcher
-	defer d.watcher.Close()
+	defer func() { _ = d.watcher.Close() }()
 
 	// process events
 	for {
@@ -186,7 +193,7 @@ func (d *daemon) worker() {
 			}
 
 			// get path object
-			p, err := d.getPathObject(event.Name)
+			pathObj, err := d.getPathObject(event.Name)
 			if err != nil {
 				d.log.Error().
 					Err(err).
@@ -196,10 +203,10 @@ func (d *daemon) worker() {
 			}
 
 			// rewrite
-			rewritten := p.Rewriter(event.Name)
+			rewritten := pathObj.Rewriter(event.Name)
 
 			// filter
-			if !p.Allowed(rewritten) {
+			if !pathObj.Allowed(rewritten) {
 				continue
 			}
 
@@ -230,7 +237,7 @@ type queue struct {
 }
 
 func newQueue(cb autoscan.ProcessorFunc, log zerolog.Logger, priority int) *queue {
-	q := &queue{
+	scanQueue := &queue{
 		callback: cb,
 		log:      log,
 		priority: priority,
@@ -239,9 +246,9 @@ func newQueue(cb autoscan.ProcessorFunc, log zerolog.Logger, priority int) *queu
 		lock:     &sync.Mutex{},
 	}
 
-	go q.worker()
+	go scanQueue.worker()
 
-	return q
+	return scanQueue
 }
 
 func (q *queue) add(path string) {
@@ -286,19 +293,19 @@ func (q *queue) process() {
 
 	var ready []readyScan
 	now := time.Now()
-	for p, t := range q.scans {
+	for pathStr, t := range q.scans {
 		if now.Before(t) {
 			continue
 		}
 		ready = append(ready, readyScan{
-			path: p,
+			path: pathStr,
 			scan: autoscan.Scan{
-				Folder:   filepath.Clean(p),
+				Folder:   filepath.Clean(pathStr),
 				Priority: q.priority,
 				Time:     now.Unix(),
 			},
 		})
-		delete(q.scans, p)
+		delete(q.scans, pathStr)
 	}
 
 	q.lock.Unlock()

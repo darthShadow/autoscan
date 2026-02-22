@@ -10,6 +10,7 @@ import (
 	"github.com/cloudbox/autoscan"
 )
 
+// Config holds configuration for the Emby target.
 type Config struct {
 	URL       string             `yaml:"url"`
 	Token     string             `yaml:"token"`
@@ -27,34 +28,35 @@ type target struct {
 	api     apiClient
 }
 
-func New(c Config) (autoscan.Target, error) {
-	l := autoscan.GetLogger(c.Verbosity).With().
+// New creates an Emby target from the given Config.
+func New(cfg Config) (autoscan.Target, error) {
+	logger := autoscan.GetLogger(cfg.Verbosity).With().
 		Str("target", "emby").
-		Str("url", c.URL).
+		Str("url", cfg.URL).
 		Logger()
 
-	rewriter, err := autoscan.NewRewriter(c.Rewrite)
+	rewriter, err := autoscan.NewRewriter(cfg.Rewrite)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create rewriter: %w", err)
 	}
 
-	api := newAPIClient(c.URL, c.Token, l)
+	api := newAPIClient(cfg.URL, cfg.Token, logger)
 
 	libraries, err := api.Libraries()
 	if err != nil {
 		return nil, err
 	}
 
-	l.Debug().
+	logger.Debug().
 		Interface("libraries", libraries).
 		Msg("Libraries Retrieved")
 
 	return &target{
-		url:       c.URL,
-		token:     c.Token,
+		url:       cfg.URL,
+		token:     cfg.Token,
 		libraries: libraries,
 
-		log:     l,
+		log:     logger,
 		rewrite: rewriter,
 		api:     api,
 	}, nil
@@ -82,19 +84,19 @@ func (t target) Scan(scan autoscan.Scan) error {
 		scanPath = path.Join(scanFolder, scan.RelativePath)
 	}
 
-	l := t.log.With().
+	logger := t.log.With().
 		Str("path", scanPath).
 		Str("library", lib.Name).
 		Logger()
 
 	// send scan request
-	l.Debug().Msg("Scan Sending")
+	logger.Debug().Msg("Scan Sending")
 
 	if err := t.api.Scan(scanPath); err != nil {
 		return err
 	}
 
-	l.Info().Msg("Scan Sent")
+	logger.Info().Msg("Scan Sent")
 	return nil
 }
 

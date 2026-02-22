@@ -1,0 +1,429 @@
+version: "2"
+
+linters:
+  # Configure the linter set. To avoid unexpected results the implicit default
+  # set is ignored and all the ones to use are explicitly enabled.
+  default: none
+  enable:
+    # Default
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    # Additional
+    - gocritic
+    - misspell
+    - prealloc
+    - revive
+    - unconvert
+    # Code quality
+    - funlen      # Function length
+    - gocognit    # Cognitive complexity
+    - mnd         # Magic numbers
+    - dupl        # Code duplication
+    - nestif      # Nesting depth
+    # Security & Error Handling
+    - gosec           # Security vulnerabilities
+    - errorlint       # Go 1.13+ error wrapping (errors.Is/As)
+    - errname         # Error naming conventions
+    - nilerr          # Returns nil with non-nil error
+    - nilnesserr      # Returns different nil error after err != nil check
+    - wrapcheck       # Errors from external packages must be wrapped
+    - forcetypeassert # Type assertions without ,ok check
+    - errchkjson      # JSON marshal/unmarshal error handling
+    - bidichk         # Dangerous unicode character sequences
+    - reassign        # Global variable reassignment
+    # Context & Logging
+    - contextcheck    # Context.Context passing validation
+    - fatcontext      # Nested context in loops/closures
+    # Resources
+    - bodyclose       # HTTP response body closed
+    - noctx           # HTTP requests without context
+    - canonicalheader # HTTP header canonical keys
+    - rowserrcheck    # sql.Rows.Err checked
+    - sqlclosecheck   # sql.Rows/Stmt closed
+    # Code Quality
+    - nilnil          # No (nil, nil) returns
+    - thelper         # t.Helper() detection
+    - goconst         # Repeated string constants
+    - unparam         # Unused function parameters
+    - usestdlibvars   # Use stdlib constants
+    - wastedassign    # Wasted assignments
+    - nolintlint      # Validates //nolint directives
+    - recvcheck       # Receiver type consistency
+    - dupword         # Duplicate words in comments/strings
+    - predeclared     # Shadows error/nil/true/new/make
+    - nakedret        # Naked returns in long functions
+    - iface           # Interface issues (identical/unused/opaque)
+    - interfacebloat  # Interfaces with too many methods
+    - asciicheck      # Non-ASCII identifiers
+    - durationcheck   # time.Duration * time.Duration bugs
+    - makezero        # Slice init with non-zero length + append
+    - nosprintfhostport # Use net.JoinHostPort instead of Sprintf
+    # Modern Go (1.21+)
+    - intrange        # Integer range loops
+    - modernize       # Modern Go idioms and stdlib features
+    - exptostd        # Replace golang.org/x/exp with stdlib
+    - gomoddirectives # go.mod directive validation
+    # Naming
+    - varnamelen      # Variable name length vs scope
+    # Performance
+    - perfsprint      # Faster fmt.Sprintf alternatives
+    - mirror          # bytes/strings mirror patterns
+    # Style
+    - tagliatelle     # Struct tag consistency
+    # Correctness
+    - containedctx              # Prevent context.Context in structs
+    - copyloopvar               # Loop variable aliasing bugs
+    - gocheckcompilerdirectives # Validate //go: directives
+    - musttag                   # Struct tag completeness for marshal/unmarshal
+    - dogsled                   # Too many blank identifiers
+    - goprintffuncname          # Printf-like function naming convention
+    - embeddedstructfieldcheck  # Forbid embedded sync.Mutex
+    - usetesting                # Go 1.24+ testing best practices
+    # Exhaustiveness
+    - exhaustive      # Enum switch exhaustiveness (opt-in via //exhaustive:enforce)
+    - gochecksumtype  # Sum type exhaustiveness
+    # Formatting
+    - whitespace      # Blank lines at block boundaries (auto-fixable)
+    # Zerolog
+    - zerologlint     # Zerolog dispatch validation
+
+  # Exclusions configuration (v2 format)
+  exclusions:
+    # Don't use default exclusion presets - see ALL issues
+    presets: []
+    generated: strict      # Properly skip generated code
+    warn-unused: true      # Catch stale exclusion rules
+    # Exclude rules for specific paths
+    rules:
+      - path: _test\.go
+        linters:
+          - funlen
+          - gocognit
+          - dupl
+          - gosec
+          - goconst
+          - varnamelen
+          - noctx        # Test HTTP requests don't need context
+          - tagliatelle  # Test structs may embed external-format tags
+      # JSON tags in these files are dictated by external API contracts
+      # and cannot be changed to match the configured snake_case convention.
+      - path: targets/plex/api\.go
+        linters:
+          - tagliatelle  # Tags match Plex API format (PascalCase)
+      - path: targets/emby/api\.go
+        linters:
+          - tagliatelle  # Tags match Emby API format (PascalCase)
+      - path: targets/jellyfin/api\.go
+        linters:
+          - tagliatelle  # Tags match Jellyfin API format (PascalCase)
+      - path: triggers/sonarr/sonarr\.go
+        linters:
+          - tagliatelle  # Tags match Sonarr webhook format (camelCase)
+      - path: triggers/radarr/radarr\.go
+        linters:
+          - tagliatelle  # Tags match Radarr webhook format (camelCase)
+      - path: triggers/readarr/readarr\.go
+        linters:
+          - tagliatelle  # Tags match Readarr webhook format (camelCase)
+      - path: triggers/lidarr/lidarr\.go
+        linters:
+          - tagliatelle  # Tags match Lidarr webhook format (camelCase)
+
+  # Configure checks. Mostly using defaults but with some commented exceptions.
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    staticcheck:
+      # With staticcheck there is only one setting, so to extend the implicit
+      # default value it must be explicitly included.
+      checks:
+        # Default
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        # Disable quickfix checks
+        - -QF*
+    gocritic:
+      # With gocritic there are different settings, but since enabled-checks
+      # and disabled-checks cannot both be set, for full customization the
+      # alternative is to disable all defaults and explicitly enable the ones
+      # to use.
+      disable-all: true
+      enabled-checks:
+        # Defaults (selectively enabled, see disable-all above)
+        #- appendAssign # Skip default
+        - argOrder
+        - assignOp
+        - badCall
+        - badCond
+        #- captLocal # Skip default
+        - caseOrder
+        - codegenComment
+        #- commentFormatting # Skip default
+        - defaultCaseOrder
+        - deprecatedComment
+        - dupArg
+        - dupBranchBody
+        - dupCase
+        - dupSubExpr
+        - elseif
+        - exitAfterDefer
+        - flagDeref
+        - flagName
+        #- ifElseChain # Skip default
+        - mapKey
+        - newDeref
+        - offBy1
+        - regexpMust
+        #- singleCaseSwitch # Skip default
+        - sloppyLen
+        - sloppyTypeAssert
+        - switchTrue
+        - typeSwitchVar
+        - underef
+        - unlambda
+        - unslice
+        - valSwap
+        - wrapperFunc
+        # Bug prevention
+        - badLock
+        - badRegexp
+        - badSyncOnceFunc
+        - deferInLoop
+        - externalErrorReassign
+        - sortSlice
+        - truncateCmp
+        - uncheckedInlineErr
+        - weakCond
+        # Code quality
+        - boolExprSimplify
+        - builtinShadow
+        - dupImport
+        - emptyStringTest
+        - equalFold
+        - filepathJoin
+        - httpNoBody
+        - importShadow
+        - nestingReduce
+        - nilValReturn
+        - redundantSprint
+        - regexpPattern
+        - sloppyReassign
+        - sprintfQuotedString
+        - stringConcatSimplify
+        - timeExprSimplify
+        - unnecessaryBlock
+        - unnecessaryDefer
+    revive:
+      # Enable all rules, then selectively disable
+      enable-all-rules: true
+      rules:
+        # Disable specific rules
+        - name: empty-block
+          disabled: true
+        - name: increment-decrement
+          disabled: true
+        - name: redefines-builtin-id
+          disabled: true
+        - name: superfluous-else
+          disabled: true
+        - name: unreachable-code
+          disabled: true
+        - name: unused-parameter
+          disabled: true
+        # Disable rules covered by dedicated linters
+        - name: cognitive-complexity
+          disabled: true  # Covered by gocognit
+        - name: function-length
+          disabled: true  # Covered by funlen
+        - name: cyclomatic
+          disabled: true  # We don't enforce cyclomatic complexity separately
+        - name: add-constant
+          disabled: true  # Covered by mnd (more intelligently)
+        # Configure rules with arguments
+        - name: unhandled-error
+          arguments:
+            - "fmt.Print"
+            - "fmt.Printf"
+            - "fmt.Println"
+            - "strings.Builder.Write"
+            - "strings.Builder.WriteByte"
+            - "strings.Builder.WriteString"
+            - "strings.Builder.WriteRune"
+            - "bytes.Buffer.WriteByte"
+        - name: argument-limit
+          arguments: [5]  # Maximum 5 parameters per function
+        - name: line-length-limit
+          arguments: [120]  # Maximum 120 characters per line
+    funlen:
+      # Maximum lines in a function
+      lines: 80
+      # Maximum statements in a function
+      statements: 50
+    gocognit:
+      # Maximum cognitive complexity
+      min-complexity: 30
+    mnd:
+      # Magic Number Detector settings
+      checks:
+        - argument
+        - case
+        - condition
+        - operation
+        - return
+        - assign
+      # Common constants that are acceptable
+      ignored-numbers:
+        - '0'
+        - '1'
+        - '2'
+        - '10'
+        - '100'
+        - '1024'       # Common power-of-two constant (buffers, byte conversions)
+        - '0o755'      # Common file permissions
+        - '0o644'
+      # Functions where magic numbers are acceptable
+      ignored-functions:
+        - 'os.MkdirAll'
+        - 'os.OpenFile'
+        - 'os.WriteFile'
+      # Ignore magic numbers in test files
+      ignored-files:
+        - '.*_test\.go'
+    dupl:
+      # Minimum token sequence for duplication detection
+      threshold: 100
+    nestif:
+      # Maximum nesting depth
+      min-complexity: 4
+    gosec:
+      # Security severity and confidence thresholds
+      severity: medium
+      confidence: medium
+      excludes:
+        - G104  # Covered by errcheck
+    perfsprint:
+      # Suggest faster alternatives to fmt.Sprintf
+      int-conversion: true  # fmt.Sprintf("%d", i) → strconv.Itoa(i)
+      err-error: true       # fmt.Sprintf("%s", err) → err.Error()
+      errorf: true          # fmt.Sprintf(...) → fmt.Errorf(...)
+      sprintf1: true        # fmt.Sprintf("%s", s) → s
+    recvcheck:
+      # Check receiver type consistency across methods
+      # Built-in exclusions: MarshalText, MarshalJSON, MarshalYAML, MarshalXML, MarshalBinary, GobEncode
+      disable-builtin: false
+    goconst:
+      # Find repeated string constants
+      min-len: 3
+      min-occurrences: 3
+    nilnil:
+      # Detect returning non-nil error with valid value
+      detect-opposite: true
+    nakedret:
+      # Only flag naked returns in functions longer than this
+      max-func-lines: 10
+    iface:
+      # Enable all interface analyzers
+      enable:
+        - identical  # Interfaces with identical method sets
+        - unused     # Interfaces not used in same package
+        - opaque     # Functions returning interface but always same concrete type
+    interfacebloat:
+      # Maximum methods allowed in an interface
+      max: 10
+    gomoddirectives:
+      # Allow local replace directives (for go workspaces)
+      replace-local: true
+    nolintlint:
+      # Validate //nolint directives
+      require-explanation: true
+      require-specific: true
+    wrapcheck:
+      # Require wrapping errors from external packages
+      ignore-package-globs: []
+      ignore-sigs: []
+      ignore-interface-regexps: []
+    tagliatelle:
+      # Struct tag naming consistency
+      case:
+        rules:
+          json: snake   # Enforce snake_case for JSON
+          yaml: kebab   # Enforce kebab-case for YAML
+    varnamelen:
+      min-name-length: 3
+      max-distance: 10
+      check-receiver: false
+      check-return: false
+      check-type-param: false
+      ignore-type-assert-ok: true
+      ignore-map-index-ok: true
+      ignore-chan-recv-ok: true
+      ignore-names:
+        - err
+        - fd
+        - db
+        - tx
+        - mu
+        - rl
+        - wg
+      ignore-decls:
+        - t testing.T
+        - b testing.B
+        - i int
+        - T any
+        - wg sync.WaitGroup
+        - w http.ResponseWriter
+        - r *http.Request
+        - g *errgroup.Group
+    copyloopvar:
+      check-alias: true
+    embeddedstructfieldcheck:
+      forbid-mutex: true
+    fatcontext:
+      check-struct-pointers: true
+    errchkjson:
+      check-error-free-encoding: true
+    exhaustive:
+      explicit-exhaustive-switch: true
+      default-signifies-exhaustive: true
+
+formatters:
+  enable:
+    - gci
+    - gofumpt
+    - goimports
+  settings:
+    gci:
+      sections:
+        - standard                           # stdlib
+        - default                            # third-party
+        - prefix(github.com/cloudbox)        # project packages
+        - localmodule                        # local module imports
+      custom-order: true
+    gofumpt:
+      extra-rules: true
+  exclusions:
+    generated: strict
+    warn-unused: true
+
+issues:
+  # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
+  max-issues-per-linter: 0
+  # Maximum count of issues with the same text. Set to 0 to disable. Default is 3.
+  max-same-issues: 0
+
+run:
+  # Timeout for total work, e.g. 30s, 5m, 5m30s. Default is 0 (disabled).
+  timeout: 10m
+  modules-download-mode: vendor         # Use vendored dependencies
+  allow-parallel-runners: true          # Dev ergonomics
+  allow-serial-runners: true            # Dev ergonomics

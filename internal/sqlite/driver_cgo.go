@@ -1,5 +1,4 @@
 //go:build cgo
-// +build cgo
 
 package sqlite
 
@@ -35,8 +34,10 @@ func init() {
 // getDSN returns a DSN string for the SQLite database.
 // writable is true if the database is writable, false otherwise.
 // Source: https://github.com/nalgeon/redka/blob/017c0b28f7685311c3948b2e6a531012c8092bd3/internal/sqlx/db.go#L173
+//
+//nolint:revive // writable bool is essential: it selects between two distinct DSN construction paths (RO vs RW)
 func getDSN(dbPath string, writable bool) string {
-	dsn := fmt.Sprintf("file:%s", dbPath)
+	dsn := "file:" + dbPath
 
 	params := url.Values{}
 
@@ -86,7 +87,6 @@ func getDSN(dbPath string, writable bool) string {
 		// https://sqlite.org/lang_transaction.html
 		//goland:noinspection SpellCheckingInspection
 		params.Set("_txlock", "immediate")
-
 	} else {
 		// Prevent data-changes on the database.
 		// https://sqlite.org/pragma.html#pragma_query_only
@@ -101,7 +101,12 @@ func getDSN(dbPath string, writable bool) string {
 	return dsn + "?" + params.Encode()
 }
 
+// OpenDB opens a SQLite database at dbPath; set writable to true for the read-write connection.
 func OpenDB(dbPath string, writable bool) (*sql.DB, error) {
 	dsn := getDSN(dbPath, writable)
-	return sql.Open(driverName, dsn)
+	db, err := sql.Open(driverName, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite db: %w", err)
+	}
+	return db, nil
 }

@@ -1,3 +1,4 @@
+// Package main is the autoscan CLI application.
 package main
 
 import (
@@ -6,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-func defaultConfigDirectory(app string, filename string) string {
+func defaultConfigDirectory(app, filename string) string {
 	// binary path
 	bcd := getBinaryPath()
 	if _, err := os.Stat(filepath.Join(bcd, filename)); err == nil {
@@ -23,7 +24,7 @@ func defaultConfigDirectory(app string, filename string) string {
 
 	acd := filepath.Join(ucd, app)
 	if _, err := os.Stat(acd); os.IsNotExist(err) {
-		if err := os.MkdirAll(acd, os.ModePerm); err != nil {
+		if err := os.MkdirAll(acd, 0o750); err != nil {
 			panic(fmt.Sprintf("mkdirall: %v", err))
 		}
 	}
