@@ -47,7 +47,7 @@ func New(c Config) (autoscan.Target, error) {
 
 	l.Debug().
 		Interface("libraries", libraries).
-		Msg("Retrieved libraries")
+		Msg("Libraries Retrieved")
 
 	return &target{
 		url:       c.URL,
@@ -72,7 +72,7 @@ func (t target) Scan(scan autoscan.Scan) error {
 	if err != nil {
 		t.log.Warn().
 			Err(err).
-			Msg("No target libraries found")
+			Msg("Libraries Not Found")
 
 		return nil
 	}
@@ -88,13 +88,13 @@ func (t target) Scan(scan autoscan.Scan) error {
 		Logger()
 
 	// send scan request
-	l.Trace().Msg("Sending scan request")
+	l.Debug().Msg("Scan Sending")
 
 	if err := t.api.Scan(scanPath); err != nil {
 		return err
 	}
 
-	l.Info().Msg("Scan moved to target")
+	l.Info().Msg("Scan Sent")
 	return nil
 }
 

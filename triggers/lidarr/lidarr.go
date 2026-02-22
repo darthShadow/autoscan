@@ -59,21 +59,21 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	event := new(lidarrEvent)
 	err = json.NewDecoder(r.Body).Decode(event)
 	if err != nil {
-		l.Error().Err(err).Msg("Failed decoding request")
+		l.Error().Err(err).Msg("Request Decode Failed")
 		rw.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	l.Trace().Interface("event", event).Msg("Received JSON body")
+	l.Trace().Interface("event", event).Msg("Webhook Payload")
 
 	if strings.EqualFold(event.Type, "Test") {
-		l.Info().Msg("Received test event")
+		l.Info().Msg("Test Event")
 		rw.WriteHeader(http.StatusOK)
 		return
 	}
 
 	if !strings.EqualFold(event.Type, "Download") || len(event.Files) == 0 {
-		l.Error().Msg("Required fields are missing")
+		l.Error().Msg("Required Fields Missing")
 		rw.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -98,7 +98,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	err = h.callback(scans...)
 	if err != nil {
-		l.Error().Err(err).Msg("Processor could not process scans")
+		l.Error().Err(err).Msg("Scan Enqueue Failed")
 		rw.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -107,7 +107,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	l.Info().
 		Str("path", scans[0].Folder).
 		Str("event", event.Type).
-		Msg("Scan moved to processor")
+		Msg("Scan Enqueued")
 }
 
 var now = time.Now

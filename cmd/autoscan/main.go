@@ -87,6 +87,7 @@ var (
 		Database  string `type:"path" default:"${database_file}" env:"AUTOSCAN_DATABASE" help:"Database file path"`
 		Log       string `type:"path" default:"${log_file}" env:"AUTOSCAN_LOG" help:"Log file path"`
 		Verbosity int    `type:"counter" default:"0" short:"v" env:"AUTOSCAN_VERBOSITY" help:"Log level verbosity"`
+	LogLevel  string `default:"" env:"AUTOSCAN_LOG_LEVEL" help:"Log level (trace,debug,info,warn,error,fatal)"`
 	}
 )
 
@@ -131,24 +132,29 @@ func main() {
 	logger := log.Output(io.MultiWriter(zerolog.ConsoleWriter{
 		TimeFormat: time.Stamp,
 		Out:        os.Stderr,
-	}, zerolog.ConsoleWriter{
-		TimeFormat: time.Stamp,
-		Out: &lumberjack.Logger{
-			Filename:   cli.Log,
-			MaxSize:    5,
-			MaxAge:     14,
-			MaxBackups: 5,
-		},
-		NoColor: true,
+	}, &lumberjack.Logger{
+		Filename:   cli.Log,
+		MaxSize:    5,
+		MaxAge:     14,
+		MaxBackups: 5,
 	}))
 
-	switch {
-	case cli.Verbosity == 1:
-		log.Logger = logger.Level(zerolog.DebugLevel)
-	case cli.Verbosity > 1:
-		log.Logger = logger.Level(zerolog.TraceLevel)
-	default:
-		log.Logger = logger.Level(zerolog.InfoLevel)
+	if cli.LogLevel != "" {
+		level, err := zerolog.ParseLevel(cli.LogLevel)
+		if err != nil {
+			log.Logger = logger.Level(zerolog.InfoLevel)
+			log.Fatal().Str("level", cli.LogLevel).Msg("Invalid Log Level")
+		}
+		log.Logger = logger.Level(level)
+	} else {
+		switch {
+		case cli.Verbosity == 1:
+			log.Logger = logger.Level(zerolog.DebugLevel)
+		case cli.Verbosity > 1:
+			log.Logger = logger.Level(zerolog.TraceLevel)
+		default:
+			log.Logger = logger.Level(zerolog.InfoLevel)
+		}
 	}
 
 	// datastore
@@ -157,7 +163,7 @@ func main() {
 	if err != nil {
 		log.Fatal().
 			Err(err).
-			Msg("Failed opening datastore")
+			Msg("Datastore Init Failed")
 	}
 
 	// config
@@ -165,7 +171,7 @@ func main() {
 	if err != nil {
 		log.Fatal().
 			Err(err).
-			Msg("Failed opening config")
+			Msg("Config Open Failed")
 	}
 	defer func() {
 		_ = file.Close()
@@ -186,7 +192,7 @@ func main() {
 	if err != nil {
 		log.Fatal().
 			Err(err).
-			Msg("Failed decoding config")
+			Msg("Config Decode Failed")
 	}
 
 	// processor
@@ -198,17 +204,17 @@ func main() {
 	if err != nil {
 		log.Fatal().
 			Err(err).
-			Msg("Failed initialising processor")
+			Msg("Processor Init Failed")
 	}
 
 	log.Info().
 		Stringer("min_age", c.MinimumAge).
 		Strs("anchors", c.Anchors).
-		Msg("Initialised processor")
+		Msg("Processor Initialised")
 
 	// Check authentication. If no auth -> warn user.
 	if c.Auth.Username == "" || c.Auth.Password == "" {
-		log.Warn().Msg("Webhooks running without authentication")
+		log.Warn().Msg("Webhooks Unauthenticated")
 	}
 
 	// daemon triggers
@@ -218,7 +224,7 @@ func main() {
 			log.Fatal().
 				Err(err).
 				Str("trigger", "bernard").
-				Msg("Failed initialising trigger")
+				Msg("Trigger Init Failed")
 		}
 
 		go trigger(proc.Add)
@@ -230,7 +236,7 @@ func main() {
 			log.Fatal().
 				Err(err).
 				Str("trigger", "inotify").
-				Msg("Failed initialising trigger")
+				Msg("Trigger Init Failed")
 		}
 
 		go trigger(proc.Add)
@@ -246,12 +252,12 @@ func main() {
 				addr = fmt.Sprintf("%s:%d", host, c.Port)
 			}
 
-			log.Info().Msgf("Starting server on %s", addr)
+			log.Info().Str("addr", addr).Msg("Server Starting")
 			if err := http.ListenAndServe(addr, router); err != nil {
 				log.Fatal().
 					Str("addr", addr).
 					Err(err).
-					Msg("Failed starting web server")
+					Msg("Server Start Failed")
 			}
 		}(h)
 	}
@@ -264,7 +270,7 @@ func main() {
 		Int("radarr", len(c.Triggers.Radarr)).
 		Int("readarr", len(c.Triggers.Readarr)).
 		Int("sonarr", len(c.Triggers.Sonarr)).
-		Msg("Initialised triggers")
+		Msg("Triggers Initialised")
 
 	// targets
 	targets := make([]autoscan.Target, 0)
@@ -276,7 +282,7 @@ func main() {
 				Err(err).
 				Str("target", "autoscan").
 				Str("target_url", t.URL).
-				Msg("Failed initialising target")
+				Msg("Target Init Failed")
 		}
 
 		targets = append(targets, tp)
@@ -289,7 +295,7 @@ func main() {
 				Err(err).
 				Str("target", "plex").
 				Str("target_url", t.URL).
-				Msg("Failed initialising target")
+				Msg("Target Init Failed")
 		}
 
 		targets = append(targets, tp)
@@ -302,7 +308,7 @@ func main() {
 				Err(err).
 				Str("target", "emby").
 				Str("target_url", t.URL).
-				Msg("Failed initialising target")
+				Msg("Target Init Failed")
 		}
 
 		targets = append(targets, tp)
@@ -315,7 +321,7 @@ func main() {
 				Err(err).
 				Str("target", "jellyfin").
 				Str("target_url", t.URL).
-				Msg("Failed initialising target")
+				Msg("Target Init Failed")
 		}
 
 		targets = append(targets, tp)
@@ -326,7 +332,7 @@ func main() {
 		Int("plex", len(c.Targets.Plex)).
 		Int("emby", len(c.Targets.Emby)).
 		Int("jellyfin", len(c.Targets.Jellyfin)).
-		Msg("Initialised targets")
+		Msg("Targets Initialised")
 
 	// scan stats
 	if c.ScanStats.Seconds() > 0 {
@@ -336,27 +342,27 @@ func main() {
 	// display initialised banner
 	log.Info().
 		Str("version", fmt.Sprintf("%s (%s@%s)", Version, GitCommit, Timestamp)).
-		Msg("Initialised")
+		Msg("Autoscan Initialised")
 
 	// signal handler
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigCh
-		log.Info().Str("signal", sig.String()).Msg("Received signal, shutting down...")
+		log.Info().Str("signal", sig.String()).Msg("Shutdown Signal")
 		_ = proc.Close()
 		os.Exit(0)
 	}()
 
 	// processor
-	log.Info().Msg("Processor started")
+	log.Info().Msg("Processor Started")
 
 	targetsAvailable := false
 	targetsSize := len(targets)
 	for {
 		// exit when no targets setup
 		if targetsSize == 0 {
-			log.Fatal().Msg("No targets initialised, exiting...")
+			log.Fatal().Msg("No Targets")
 		}
 
 		// target availability checker
@@ -367,10 +373,10 @@ func main() {
 				targetsAvailable = true
 
 			case errors.Is(err, autoscan.ErrFatal):
-				log.Fatal().Err(err).Msg("Fatal error occurred while checking target availability, exiting...")
+				log.Fatal().Err(err).Msg("Target Check Failed")
 
 			default:
-				log.Error().Err(err).Msg("Not all targets are available, retrying in 15 seconds...")
+				log.Error().Err(err).Msg("Targets Unavailable")
 				time.Sleep(15 * time.Second)
 				continue
 			}
@@ -385,24 +391,24 @@ func main() {
 
 		case errors.Is(err, autoscan.ErrNoScans):
 			// No scans currently available, let's wait a couple of seconds
-			log.Trace().Msg("No scans are available, retrying in 15 seconds...")
+			log.Trace().Msg("No Scans Available")
 			time.Sleep(15 * time.Second)
 
 		case errors.Is(err, autoscan.ErrAnchorUnavailable):
-			log.Error().Err(err).Msg("Not all anchor files are available, retrying in 15 seconds...")
+			log.Error().Err(err).Msg("Anchors Unavailable")
 			time.Sleep(15 * time.Second)
 
 		case errors.Is(err, autoscan.ErrTargetUnavailable):
 			targetsAvailable = false
-			log.Error().Err(err).Msg("Not all targets are available, retrying in 15 seconds...")
+			log.Error().Err(err).Msg("Targets Unavailable")
 			time.Sleep(15 * time.Second)
 
 		case errors.Is(err, autoscan.ErrFatal):
-			log.Fatal().Err(err).Msg("Fatal error occurred while processing targets, exiting...")
+			log.Fatal().Err(err).Msg("Processing Failed")
 
 		default:
 			// unexpected error
-			log.Fatal().Err(err).Msg("Failed processing targets, exiting...")
+			log.Fatal().Err(err).Msg("Processing Failed")
 		}
 	}
 }

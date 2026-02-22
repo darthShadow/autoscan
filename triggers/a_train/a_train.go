@@ -82,12 +82,12 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	event := new(atrainEvent)
 	err = json.NewDecoder(r.Body).Decode(event)
 	if err != nil {
-		rlog.Error().Err(err).Msg("Failed decoding request")
+		rlog.Error().Err(err).Msg("Request Decode Failed")
 		rw.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	rlog.Trace().Interface("event", event).Msg("Received JSON body")
+	rlog.Trace().Interface("event", event).Msg("Webhook Payload")
 
 	scans := make([]autoscan.Scan, 0)
 
@@ -109,13 +109,13 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	err = h.callback(scans...)
 	if err != nil {
-		rlog.Error().Err(err).Msg("Processor could not process scans")
+		rlog.Error().Err(err).Msg("Scan Enqueue Failed")
 		rw.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
 	for _, scan := range scans {
-		rlog.Info().Str("path", scan.Folder).Msg("Scan moved to processor")
+		rlog.Info().Str("path", scan.Folder).Msg("Scan Enqueued")
 	}
 
 	rw.WriteHeader(http.StatusOK)

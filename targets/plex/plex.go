@@ -44,7 +44,7 @@ func New(c Config) (autoscan.Target, error) {
 		return nil, err
 	}
 
-	l.Debug().Msgf("Plex version: %s", version)
+	l.Debug().Str("version", version).Msg("Plex Version")
 	if !isSupportedVersion(version) {
 		return nil, fmt.Errorf("plex running unsupported version %s: %w", version, autoscan.ErrFatal)
 	}
@@ -56,7 +56,7 @@ func New(c Config) (autoscan.Target, error) {
 
 	l.Debug().
 		Interface("libraries", libraries).
-		Msg("Retrieved libraries")
+		Msg("Libraries Retrieved")
 
 	return &target{
 		url:       c.URL,
@@ -82,7 +82,7 @@ func (t target) Scan(scan autoscan.Scan) error {
 	if err != nil {
 		t.log.Warn().
 			Err(err).
-			Msg("No target libraries found")
+			Msg("Libraries Not Found")
 
 		return nil
 	}
@@ -94,13 +94,13 @@ func (t target) Scan(scan autoscan.Scan) error {
 			Str("library", lib.Name).
 			Logger()
 
-		l.Trace().Msg("Sending scan request")
+		l.Debug().Msg("Scan Sending")
 
 		if err := t.api.Scan(scanFolder, lib.ID); err != nil {
 			return err
 		}
 
-		l.Info().Msg("Scan moved to target")
+		l.Info().Msg("Scan Sent")
 	}
 
 	return nil

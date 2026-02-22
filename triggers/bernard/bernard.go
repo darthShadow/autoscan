@@ -110,7 +110,7 @@ func New(c Config, db *sql.DB) (autoscan.Trigger, error) {
 		if err := d.startAutoSync(); err != nil {
 			l.Error().
 				Err(err).
-				Msg("Failed initialising cron jobs")
+				Msg("Cron Init Failed")
 			return
 		}
 	}
@@ -163,17 +163,17 @@ func (s *syncJob) Run() {
 
 	case errors.Is(err, lowe.ErrInvalidCredentials), errors.Is(err, ds.ErrDataAnomaly), errors.Is(err, lowe.ErrNetwork):
 		// retryable error occurred
-		s.log.Trace().
+		s.log.Debug().
 			Err(err).
 			Int("attempts", s.attempts).
-			Msg("Retryable error occurred while syncing drive")
+			Msg("Sync Retry")
 		s.errors = append(s.errors, err)
 
 	case errors.Is(err, autoscan.ErrFatal):
 		// fatal error occurred, we cannot recover from this safely
 		s.log.Error().
 			Err(err).
-			Msg("Fatal error occurred while syncing drive, drive has been stopped...")
+			Msg("Sync Fatal")
 
 		s.cron.Remove(s.jobID)
 		return
@@ -183,7 +183,7 @@ func (s *syncJob) Run() {
 		s.log.Warn().
 			Err(err).
 			Int("attempts", s.attempts).
-			Msg("Unexpected error occurred while syncing drive")
+			Msg("Sync Unexpected Error")
 		s.errors = append(s.errors, err)
 	}
 
@@ -192,7 +192,7 @@ func (s *syncJob) Run() {
 		s.log.Error().
 			Errs("error", s.errors).
 			Int("attempts", s.attempts).
-			Msg("Consecutive errors occurred while syncing drive, drive has been stopped...")
+			Msg("Sync Stopped")
 
 		s.cron.Remove(s.jobID)
 	}
@@ -220,7 +220,7 @@ func (d daemon) runSyncWithWatchdog(driveID string, syncFn func() error) error {
 	case <-time.After(syncWatchdogTimeout):
 		d.log.Warn().Str("drive_id", driveID).
 			Dur("elapsed", syncWatchdogTimeout).
-			Msg("Sync exceeded expected duration, still waiting for completion...")
+			Msg("Sync Watchdog")
 		return <-done
 	}
 }
@@ -254,14 +254,14 @@ func (d daemon) startAutoSync() error {
 			// full sync
 			if fullSync {
 				return d.runSyncWithWatchdog(drive.ID, func() error {
-					l.Info().Msg("Starting full sync")
+					l.Info().Msg("Full Sync Starting")
 					start := time.Now()
 
 					if err := d.bernard.FullSync(drive.ID); err != nil {
 						return fmt.Errorf("%v: performing full sync: %w", drive.ID, err)
 					}
 
-					l.Info().Msgf("Finished full sync in %s", time.Since(start))
+					l.Info().Dur("elapsed", time.Since(start)).Msg("Full Sync Finished")
 					fullSync = false
 					return nil
 				})
@@ -273,7 +273,7 @@ func (d daemon) startAutoSync() error {
 			ch, paths := NewPathsHook(drive.ID, d.store, diff)
 
 			return d.runSyncWithWatchdog(drive.ID, func() error {
-				l.Trace().Msg("Running partial sync")
+				l.Debug().Msg("Partial Sync Starting")
 				start := time.Now()
 
 				// do partial sync
@@ -282,10 +282,11 @@ func (d daemon) startAutoSync() error {
 					return fmt.Errorf("%v: performing partial sync: %w", drive.ID, err)
 				}
 
-				l.Trace().
+				l.Debug().
 					Int("new", len(paths.NewFolders)).
 					Int("old", len(paths.OldFolders)).
-					Msgf("Partial sync finished in %s", time.Since(start))
+					Dur("elapsed", time.Since(start)).
+					Msg("Partial Sync Finished")
 
 				// translate paths to scan task
 				task := d.getScanTask(&(drive), paths)
@@ -294,7 +295,7 @@ func (d daemon) startAutoSync() error {
 				if len(task.scans) > 0 {
 					l.Trace().
 						Interface("scans", task.scans).
-						Msg("Scans moving to processor")
+						Msg("Scans Enqueuing")
 
 					err := d.callback(task.scans...)
 					if err != nil {
@@ -305,7 +306,7 @@ func (d daemon) startAutoSync() error {
 					l.Info().
 						Int("added", task.added).
 						Int("removed", task.removed).
-						Msg("Scan moved to processor")
+						Msg("Scans Enqueued")
 				}
 
 				return nil

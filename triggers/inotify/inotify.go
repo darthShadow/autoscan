@@ -79,7 +79,7 @@ func New(c Config) (autoscan.Trigger, error) {
 		if err := d.startMonitoring(); err != nil {
 			l.Error().
 				Err(err).
-				Msg("Failed initialising jobs")
+				Msg("Jobs Init Failed")
 			return
 		}
 	}
@@ -124,9 +124,9 @@ func (d *daemon) walkFunc(path string, fi os.FileInfo, err error) error {
 		return fmt.Errorf("watch directory: %v: %w", path, err)
 	}
 
-	d.log.Trace().
+	d.log.Debug().
 		Str("path", path).
-		Msg("Watching directory")
+		Msg("Watch Added")
 
 	return nil
 }
@@ -152,7 +152,7 @@ func (d *daemon) worker() {
 			// new filesystem event
 			d.log.Trace().
 				Interface("event", event).
-				Msg("Filesystem event")
+				Msg("FS Event")
 
 			switch {
 			case event.Op&fsnotify.Create == fsnotify.Create:
@@ -162,7 +162,7 @@ func (d *daemon) worker() {
 					d.log.Error().
 						Err(err).
 						Str("path", event.Name).
-						Msg("Failed retrieving filesystem info")
+						Msg("FS Stat Failed")
 					continue
 				}
 
@@ -172,7 +172,7 @@ func (d *daemon) worker() {
 						d.log.Error().
 							Err(err).
 							Str("path", event.Name).
-							Msg("Failed watching new directory")
+							Msg("Watch Failed")
 					}
 
 					continue
@@ -191,7 +191,7 @@ func (d *daemon) worker() {
 				d.log.Error().
 					Err(err).
 					Str("path", event.Name).
-					Msg("Failed determining path object")
+					Msg("Path Match Failed")
 				continue
 			}
 
@@ -215,7 +215,7 @@ func (d *daemon) worker() {
 		case err := <-d.watcher.Errors:
 			d.log.Error().
 				Err(err).
-				Msg("Failed receiving filesystem events")
+				Msg("FS Events Failed")
 		}
 	}
 }
@@ -310,11 +310,11 @@ func (q *queue) process() {
 			q.log.Error().
 				Err(err).
 				Str("path", r.path).
-				Msg("Failed moving scan to processor")
+				Msg("Scan Enqueue Failed")
 		} else {
 			q.log.Info().
 				Str("path", r.path).
-				Msg("Scan moved to processor")
+				Msg("Scan Enqueued")
 		}
 	}
 }

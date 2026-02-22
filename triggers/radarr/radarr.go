@@ -62,15 +62,15 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	event := new(radarrEvent)
 	err = json.NewDecoder(r.Body).Decode(event)
 	if err != nil {
-		rlog.Error().Err(err).Msg("Failed decoding request")
+		rlog.Error().Err(err).Msg("Request Decode Failed")
 		rw.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	rlog.Trace().Interface("event", event).Msg("Received JSON body")
+	rlog.Trace().Interface("event", event).Msg("Webhook Payload")
 
 	if strings.EqualFold(event.Type, "Test") {
-		rlog.Info().Msg("Received test event")
+		rlog.Info().Msg("Test Event")
 		rw.WriteHeader(http.StatusOK)
 		return
 	}
@@ -82,7 +82,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	if strings.EqualFold(event.Type, "Download") || strings.EqualFold(event.Type, "MovieFileDelete") {
 		if event.File.RelativePath == "" || event.Movie.FolderPath == "" {
-			rlog.Error().Msg("Required fields are missing")
+			rlog.Error().Msg("Required Fields Missing")
 			rw.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -93,7 +93,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	if strings.EqualFold(event.Type, "MovieDelete") || strings.EqualFold(event.Type, "Rename") {
 		if event.Movie.FolderPath == "" {
-			rlog.Error().Msg("Required fields are missing")
+			rlog.Error().Msg("Required Fields Missing")
 			rw.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -110,7 +110,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	err = h.callback(scan)
 	if err != nil {
-		rlog.Error().Err(err).Msg("Processor could not process scan")
+		rlog.Error().Err(err).Msg("Scan Enqueue Failed")
 		rw.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -118,7 +118,7 @@ func (h handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	rlog.Info().
 		Str("path", folderPath).
 		Str("event", event.Type).
-		Msg("Scan moved to processor")
+		Msg("Scan Enqueued")
 
 	rw.WriteHeader(http.StatusOK)
 }

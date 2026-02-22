@@ -61,13 +61,13 @@ func (t target) Scan(scan autoscan.Scan) error {
 		Str("path", scanPath).
 		Logger()
 
-	l.Trace().Msg("Sending scan request")
+	l.Debug().Msg("Scan Sending")
 
 	if err := t.api.Scan(scanFolder, scanPath); err != nil {
 		return err
 	}
 
-	l.Info().Msg("Scan moved to target")
+	l.Info().Msg("Scan Sent")
 	return nil
 }
 

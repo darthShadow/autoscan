@@ -22,18 +22,18 @@ func scanStats(proc *processor.Processor, interval time.Duration) {
 				log.Info().
 					Int("remaining", sm).
 					Int64("processed", proc.ScansProcessed()).
-					Msg("Scan stats")
+					Msg("Scan Stats")
 			case errors.Is(err, autoscan.ErrFatal):
 				log.Error().
 					Err(err).
-					Msg("Fatal error determining amount of remaining scans, scan stats stopped...")
+					Msg("Stats Stopped")
 				st.Stop()
 				return
 			default:
 				// ErrNoScans should never occur as COUNT should always at-least return 0
 				log.Error().
 					Err(err).
-					Msg("Failed determining amount of remaining scans")
+					Msg("Scan Stats Failed")
 			}
 		}
 	}

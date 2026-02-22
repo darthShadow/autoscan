@@ -45,7 +45,7 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 		hlog.FromRequest(r).Debug().
 			Int("status", status).
 			Dur("duration", duration).
-			Msg("Request processed")
+			Msg("Request Processed")
 	}))
 
 	// Health check
@@ -62,7 +62,7 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 		r.Route("/a-train", func(r chi.Router) {
 			trigger, err := a_train.New(c.Triggers.ATrain)
 			if err != nil {
-				log.Fatal().Err(err).Str("trigger", "a-train").Msg("Failed initialising trigger")
+				log.Fatal().Err(err).Str("trigger", "a-train").Msg("Trigger Init Failed")
 			}
 
 			r.Post("/{drive}", trigger(proc.Add).ServeHTTP)
@@ -72,7 +72,7 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 		r.Route("/manual", func(r chi.Router) {
 			trigger, err := manual.New(c.Triggers.Manual)
 			if err != nil {
-				log.Fatal().Err(err).Str("trigger", "manual").Msg("Failed initialising trigger")
+				log.Fatal().Err(err).Str("trigger", "manual").Msg("Trigger Init Failed")
 			}
 
 			r.HandleFunc("/", trigger(proc.Add).ServeHTTP)
@@ -82,7 +82,7 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 		for _, t := range c.Triggers.Lidarr {
 			trigger, err := lidarr.New(t)
 			if err != nil {
-				log.Fatal().Err(err).Str("trigger", t.Name).Msg("Failed initialising trigger")
+				log.Fatal().Err(err).Str("trigger", t.Name).Msg("Trigger Init Failed")
 			}
 
 			r.Post(pattern(t.Name), trigger(proc.Add).ServeHTTP)
@@ -91,7 +91,7 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 		for _, t := range c.Triggers.Radarr {
 			trigger, err := radarr.New(t)
 			if err != nil {
-				log.Fatal().Err(err).Str("trigger", t.Name).Msg("Failed initialising trigger")
+				log.Fatal().Err(err).Str("trigger", t.Name).Msg("Trigger Init Failed")
 			}
 
 			r.Post(pattern(t.Name), trigger(proc.Add).ServeHTTP)
@@ -100,7 +100,7 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 		for _, t := range c.Triggers.Readarr {
 			trigger, err := readarr.New(t)
 			if err != nil {
-				log.Fatal().Err(err).Str("trigger", t.Name).Msg("Failed initialising trigger")
+				log.Fatal().Err(err).Str("trigger", t.Name).Msg("Trigger Init Failed")
 			}
 
 			r.Post(pattern(t.Name), trigger(proc.Add).ServeHTTP)
@@ -109,7 +109,7 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 		for _, t := range c.Triggers.Sonarr {
 			trigger, err := sonarr.New(t)
 			if err != nil {
-				log.Fatal().Err(err).Str("trigger", t.Name).Msg("Failed initialising trigger")
+				log.Fatal().Err(err).Str("trigger", t.Name).Msg("Trigger Init Failed")
 			}
 
 			r.Post(pattern(t.Name), trigger(proc.Add).ServeHTTP)
