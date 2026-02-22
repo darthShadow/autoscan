@@ -10,10 +10,12 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/coreos/go-systemd/v22/daemon"
 	"github.com/natefinch/lumberjack"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -71,6 +73,10 @@ type config struct {
 		Plex     []plex.Config     `yaml:"plex"`
 	} `yaml:"targets"`
 }
+
+// ready is set to true after autoscan has fully initialised, and is used by the
+// health endpoint to distinguish "starting up" from "running".
+var ready atomic.Bool
 
 var (
 	// release variables
@@ -343,6 +349,16 @@ func main() {
 	log.Info().
 		Str("version", fmt.Sprintf("%s (%s@%s)", Version, GitCommit, Timestamp)).
 		Msg("Autoscan Initialised")
+
+	// Notify systemd that initialization is complete.
+	// TODO: Add WatchdogSec support — send periodic WATCHDOG=1 from the processing loop
+	// to auto-restart hung processes.
+	ready.Store(true)
+	if ok, err := daemon.SdNotify(false, daemon.SdNotifyReady); err != nil {
+		log.Warn().Err(err).Msg("sd_notify Failed")
+	} else if ok {
+		log.Info().Msg("sd_notify Ready Sent")
+	}
 
 	// signal handler
 	sigCh := make(chan os.Signal, 1)

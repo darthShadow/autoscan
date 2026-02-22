@@ -121,5 +121,12 @@ func getRouter(c config, proc *processor.Processor) chi.Router {
 
 // Other Handlers
 func healthHandler(rw http.ResponseWriter, r *http.Request) {
-	rw.WriteHeader(http.StatusOK)
+	rw.Header().Set("Content-Type", "application/json")
+	if ready.Load() {
+		rw.WriteHeader(http.StatusOK)
+		_, _ = rw.Write([]byte(`{"status":"ready"}`))
+	} else {
+		rw.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = rw.Write([]byte(`{"status":"initializing"}`))
+	}
 }
