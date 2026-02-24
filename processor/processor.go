@@ -5,51 +5,57 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/cloudbox/autoscan"
 	"github.com/cloudbox/autoscan/internal/sqlite"
+	"github.com/cloudbox/autoscan/stats"
 )
 
 // Config holds configuration for the Processor.
 type Config struct {
 	Anchors    []string
 	MinimumAge time.Duration
+	Stats      *stats.Stats
 
 	Db *sqlite.DB
 }
 
 // New creates a Processor from the given Config.
-func New(c Config) (*Processor, error) {
-	store, err := newDatastore(c.Db)
+func New(cfg Config) (*Processor, error) {
+	store, err := newDatastore(cfg.Db)
 	if err != nil {
 		return nil, err
 	}
 
 	proc := &Processor{
-		anchors:    c.Anchors,
-		minimumAge: c.MinimumAge,
-		store:      store,
-		db:         c.Db,
+		anchors:     cfg.Anchors,
+		minimumAge:  cfg.MinimumAge,
+		store:       store,
+		stats:       cfg.Stats,
+		db:          cfg.Db,
+		anchorState: make(map[string]bool),
 	}
 	return proc, nil
 }
 
 // Processor dequeues scans and dispatches them to media server targets.
 type Processor struct {
-	anchors    []string
-	minimumAge time.Duration
-	store      *datastore
-	processed  int64
-	db         *sqlite.DB
-	processMu  sync.Mutex // Protects against concurrent Process() calls
+	anchors     []string
+	anchorState map[string]bool // tracks per-anchor availability for transition logging
+	minimumAge  time.Duration
+	store       *datastore
+	stats       *stats.Stats
+	db          *sqlite.DB
+	processMu   sync.Mutex // Protects against concurrent Process() calls
 }
 
 // Add enqueues one or more scans for processing.
 func (p *Processor) Add(scans ...autoscan.Scan) error {
+	p.stats.Received.Add(int64(len(scans)))
 	return p.store.Upsert(scans)
 }
 
@@ -58,9 +64,38 @@ func (p *Processor) ScansRemaining() (int, error) {
 	return p.store.GetScansRemaining()
 }
 
-// ScansProcessed returns the amount of scans processed
-func (p *Processor) ScansProcessed() int64 {
-	return atomic.LoadInt64(&p.processed)
+// Stats returns the shared stats instance for external counter access.
+func (p *Processor) Stats() *stats.Stats {
+	return p.stats
+}
+
+// CheckAnchors verifies that all configured anchor paths (files or directories)
+// exist. Returns true if all anchors are available (or none are configured).
+// Logs only on state transitions (available↔unavailable), not every call.
+// Must be called from a single goroutine (the scan loop).
+func (p *Processor) CheckAnchors() bool {
+	if len(p.anchors) == 0 {
+		return true
+	}
+
+	allAvailable := true
+	for _, anchor := range p.anchors {
+		available := pathExists(anchor)
+		prev, tracked := p.anchorState[anchor]
+
+		if tracked && prev && !available {
+			log.Warn().Str("path", anchor).Msg("Anchor Unavailable")
+		} else if tracked && !prev && available {
+			log.Info().Str("path", anchor).Msg("Anchor Available")
+		}
+
+		p.anchorState[anchor] = available
+		if !available {
+			allAvailable = false
+		}
+	}
+
+	return allAvailable
 }
 
 const processorTimeout = 90 * time.Second
@@ -104,6 +139,7 @@ func (*Processor) callTargets(targets []autoscan.Target, scan autoscan.Scan) err
 }
 
 // Process picks the next available scan and dispatches it to all targets.
+// Callers must call CheckAnchors() before Process() to gate on anchor availability.
 func (p *Processor) Process(targets []autoscan.Target) error {
 	// Protect against concurrent processing to prevent duplicate scan processing
 	p.processMu.Lock()
@@ -112,13 +148,6 @@ func (p *Processor) Process(targets []autoscan.Target) error {
 	scan, err := p.store.GetAvailableScan(p.minimumAge)
 	if err != nil {
 		return err
-	}
-
-	// Check whether all anchors are present
-	for _, anchor := range p.anchors {
-		if !fileExists(anchor) {
-			return fmt.Errorf("%s: %w", anchor, autoscan.ErrAnchorUnavailable)
-		}
 	}
 
 	// Fatal or Target Unavailable -> return original error
@@ -132,7 +161,7 @@ func (p *Processor) Process(targets []autoscan.Target) error {
 		return err
 	}
 
-	atomic.AddInt64(&p.processed, 1)
+	p.stats.Processed.Add(1)
 	return nil
 }
 
@@ -144,11 +173,8 @@ func (p *Processor) Close() error {
 	return nil
 }
 
-var fileExists = func(fileName string) bool {
-	info, err := os.Stat(fileName)
-	if err != nil {
-		return false
-	}
-
-	return !info.IsDir()
+// pathExists reports whether a filesystem path (file or directory) exists.
+var pathExists = func(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

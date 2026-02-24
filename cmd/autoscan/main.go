@@ -24,6 +24,7 @@ import (
 	"github.com/cloudbox/autoscan"
 	"github.com/cloudbox/autoscan/internal/sqlite"
 	"github.com/cloudbox/autoscan/processor"
+	"github.com/cloudbox/autoscan/stats"
 	ast "github.com/cloudbox/autoscan/targets/autoscan"
 	"github.com/cloudbox/autoscan/targets/emby"
 	"github.com/cloudbox/autoscan/targets/jellyfin"
@@ -168,8 +169,9 @@ func main() {
 	// config
 	cfg := loadConfig()
 
-	// processor
-	proc := initProcessor(cfg, db)
+	// stats + processor
+	procStats := stats.New()
+	proc := initProcessor(cfg, db, procStats)
 
 	// Check authentication. If no auth -> warn user.
 	if cfg.Auth.Username == "" || cfg.Auth.Password == "" {
@@ -206,7 +208,7 @@ func main() {
 
 	// scan stats
 	if cfg.ScanStats.Seconds() > 0 {
-		go scanStats(proc, cfg.ScanStats)
+		go scanStats(procStats, proc, cfg.ScanStats)
 	}
 
 	// display initialised banner
@@ -223,10 +225,11 @@ func main() {
 
 // initProcessor creates and returns the scan processor from config and database.
 // Calls log.Fatal on initialisation error.
-func initProcessor(cfg config, db *sqlite.DB) *processor.Processor {
+func initProcessor(cfg config, db *sqlite.DB, procStats *stats.Stats) *processor.Processor {
 	proc, err := processor.New(processor.Config{
 		Anchors:    cfg.Anchors,
 		MinimumAge: cfg.MinimumAge,
+		Stats:      procStats,
 		Db:         db,
 	})
 	if err != nil {
@@ -453,7 +456,8 @@ func initTargets(cfg config) []autoscan.Target {
 }
 
 // runScanLoop runs the main processing loop until the process exits.
-// It checks target availability before processing and backs off on transient errors.
+// It checks anchor availability and target availability before processing,
+// and backs off on transient errors.
 func runScanLoop(proc *processor.Processor, targets []autoscan.Target, scanDelay time.Duration) {
 	targetsAvailable := false
 	targetsSize := len(targets)
@@ -462,6 +466,12 @@ func runScanLoop(proc *processor.Processor, targets []autoscan.Target, scanDelay
 		// exit when no targets setup
 		if targetsSize == 0 {
 			log.Fatal().Msg("No Targets")
+		}
+
+		// anchor availability gate — if mounts are offline, skip everything
+		if !proc.CheckAnchors() {
+			time.Sleep(noScansDelay)
+			continue
 		}
 
 		// target availability checker
@@ -493,11 +503,8 @@ func runScanLoop(proc *processor.Processor, targets []autoscan.Target, scanDelay
 			log.Trace().Msg("No Scans Available")
 			time.Sleep(noScansDelay)
 
-		case errors.Is(err, autoscan.ErrAnchorUnavailable):
-			log.Error().Err(err).Msg("Anchors Unavailable")
-			time.Sleep(noScansDelay)
-
 		case errors.Is(err, autoscan.ErrTargetUnavailable):
+			proc.Stats().Retried.Add(1)
 			targetsAvailable = false
 			log.Error().Err(err).Msg("Targets Unavailable")
 			time.Sleep(noScansDelay)
