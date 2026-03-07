@@ -2,6 +2,7 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -121,20 +122,47 @@ func (*Processor) CheckAvailability(targets []autoscan.Target) error {
 }
 
 func (*Processor) callTargets(targets []autoscan.Target, scan autoscan.Scan) error {
-	ctx, cancel := context.WithTimeout(context.Background(), processorTimeout)
-	defer cancel()
+	errs := make([]error, len(targets))
+	var wg sync.WaitGroup
 
-	g, _ := errgroup.WithContext(ctx)
-
-	for _, target := range targets {
-		g.Go(func() error {
-			return target.Scan(scan)
+	for i, t := range targets {
+		wg.Go(func() {
+			errs[i] = t.Scan(scan)
 		})
 	}
 
-	if err := g.Wait(); err != nil {
-		return fmt.Errorf("call targets: %w", err)
+	wg.Wait()
+
+	var (
+		matched  int
+		skipped  int
+		firstErr error
+	)
+
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			matched++
+		case errors.Is(err, autoscan.ErrLibraryNotMatched):
+			skipped++
+		default:
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
 	}
+
+	if firstErr != nil {
+		return fmt.Errorf("call targets: %w", firstErr)
+	}
+
+	if matched == 0 && skipped > 0 {
+		log.Warn().
+			Str("folder", scan.Folder).
+			Int("targets_skipped", skipped).
+			Msg("No Targets Matched Scan")
+	}
+
 	return nil
 }
 

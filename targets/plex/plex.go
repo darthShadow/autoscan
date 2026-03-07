@@ -82,11 +82,8 @@ func (t target) Scan(scan autoscan.Scan) error {
 
 	libs, err := t.getScanLibrary(scanFolder)
 	if err != nil {
-		t.log.Warn().
-			Err(err).
-			Msg("Libraries Not Found")
-
-		return nil
+		t.log.Debug().Str("folder", scanFolder).Msg("Library Not Matched")
+		return fmt.Errorf("%w: %s", autoscan.ErrLibraryNotMatched, scanFolder)
 	}
 
 	// send scan request

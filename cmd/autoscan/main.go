@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -246,30 +247,40 @@ func initProcessor(cfg config, db *sqlite.DB, procStats *stats.Stats) *processor
 	return proc
 }
 
-// startHTTPServers starts one goroutine per host address that serves the router.
-// Calls log.Fatal if any server fails to start.
+// startHTTPServers binds a listener per host address, then serves in background
+// goroutines. The function returns only after every listener has successfully
+// bound, so callers can rely on the ports being open. Calls log.Fatal on bind
+// failure.
 func startHTTPServers(cfg config, router http.Handler) {
 	for _, hostAddr := range cfg.Host {
-		go func(host string) {
-			addr := host
-			if !strings.Contains(addr, ":") {
-				addr = fmt.Sprintf("%s:%d", host, cfg.Port)
-			}
+		if !strings.Contains(hostAddr, ":") {
+			hostAddr = fmt.Sprintf("%s:%d", hostAddr, cfg.Port)
+		}
 
-			log.Info().Str("addr", addr).Msg("Server Starting")
-			server := &http.Server{
-				Addr:         addr,
-				Handler:      router,
-				ReadTimeout:  serverTimeout,
-				WriteTimeout: serverTimeout,
-			}
-			if listenErr := server.ListenAndServe(); listenErr != nil {
+		var lc net.ListenConfig
+		listener, err := lc.Listen(context.Background(), "tcp", hostAddr)
+		if err != nil {
+			log.Fatal().
+				Str("addr", hostAddr).
+				Err(err).
+				Msg("Server Bind Failed")
+		}
+
+		log.Info().Str("addr", hostAddr).Msg("Server Listening")
+		server := &http.Server{
+			Handler:      router,
+			ReadTimeout:  serverTimeout,
+			WriteTimeout: serverTimeout,
+		}
+
+		go func() {
+			if serveErr := server.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 				log.Fatal().
-					Str("addr", addr).
-					Err(listenErr).
-					Msg("Server Start Failed")
+					Str("addr", hostAddr).
+					Err(serveErr).
+					Msg("Server Failed")
 			}
-		}(hostAddr)
+		}()
 	}
 }
 

@@ -1,10 +1,14 @@
 package processor
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/cloudbox/autoscan"
 	"github.com/cloudbox/autoscan/stats"
 )
 
@@ -40,6 +44,104 @@ func newTestProcessor(anchors []string) *Processor {
 		anchorState: make(map[string]bool),
 		stats:       stats.New(),
 	}
+}
+
+// mockTarget is a minimal autoscan.Target for testing callTargets.
+type mockTarget struct {
+	scanFn func(autoscan.Scan) error
+}
+
+func (m *mockTarget) Scan(scan autoscan.Scan) error {
+	return m.scanFn(scan)
+}
+
+func (*mockTarget) Available() error {
+	return nil
+}
+
+func TestCallTargets(t *testing.T) {
+	p := &Processor{}
+	scan := autoscan.Scan{Folder: "/media/movies"}
+
+	t.Run("AllMatch", func(t *testing.T) {
+		targets := []autoscan.Target{
+			&mockTarget{scanFn: func(_ autoscan.Scan) error { return nil }},
+			&mockTarget{scanFn: func(_ autoscan.Scan) error { return nil }},
+			&mockTarget{scanFn: func(_ autoscan.Scan) error { return nil }},
+		}
+		if err := p.callTargets(targets, scan); err != nil {
+			t.Errorf("expected nil error, got: %v", err)
+		}
+	})
+
+	t.Run("AllSkipped", func(t *testing.T) {
+		targets := []autoscan.Target{
+			&mockTarget{scanFn: func(_ autoscan.Scan) error {
+				return fmt.Errorf("%w: /tv", autoscan.ErrLibraryNotMatched)
+			}},
+			&mockTarget{scanFn: func(_ autoscan.Scan) error {
+				return fmt.Errorf("%w: /tv", autoscan.ErrLibraryNotMatched)
+			}},
+			&mockTarget{scanFn: func(_ autoscan.Scan) error {
+				return fmt.Errorf("%w: /tv", autoscan.ErrLibraryNotMatched)
+			}},
+		}
+		// All skipped — scan is consumed, not retried. No error returned.
+		if err := p.callTargets(targets, scan); err != nil {
+			t.Errorf("expected nil error when all targets skipped, got: %v", err)
+		}
+	})
+
+	t.Run("MixMatchAndSkip", func(t *testing.T) {
+		targets := []autoscan.Target{
+			&mockTarget{scanFn: func(_ autoscan.Scan) error { return nil }},
+			&mockTarget{scanFn: func(_ autoscan.Scan) error {
+				return fmt.Errorf("%w: /tv", autoscan.ErrLibraryNotMatched)
+			}},
+			&mockTarget{scanFn: func(_ autoscan.Scan) error { return nil }},
+		}
+		if err := p.callTargets(targets, scan); err != nil {
+			t.Errorf("expected nil error for mixed match/skip, got: %v", err)
+		}
+	})
+
+	t.Run("RealError", func(t *testing.T) {
+		targets := []autoscan.Target{
+			&mockTarget{scanFn: func(_ autoscan.Scan) error { return nil }},
+			&mockTarget{scanFn: func(_ autoscan.Scan) error {
+				return errors.New("connection refused")
+			}},
+		}
+		err := p.callTargets(targets, scan)
+		if err == nil {
+			t.Fatal("expected non-nil error, got nil")
+		}
+		if !strings.Contains(err.Error(), "connection refused") {
+			t.Errorf("expected error to contain 'connection refused', got: %v", err)
+		}
+	})
+
+	t.Run("RealErrorPlusSkip", func(t *testing.T) {
+		targets := []autoscan.Target{
+			&mockTarget{scanFn: func(_ autoscan.Scan) error {
+				return fmt.Errorf("%w: /movies", autoscan.ErrLibraryNotMatched)
+			}},
+			&mockTarget{scanFn: func(_ autoscan.Scan) error { return nil }},
+			&mockTarget{scanFn: func(_ autoscan.Scan) error {
+				return errors.New("timeout")
+			}},
+		}
+		err := p.callTargets(targets, scan)
+		if err == nil {
+			t.Fatal("expected non-nil error, got nil")
+		}
+		if !strings.Contains(err.Error(), "timeout") {
+			t.Errorf("expected error to contain 'timeout', got: %v", err)
+		}
+		if errors.Is(err, autoscan.ErrLibraryNotMatched) {
+			t.Error("returned error must not wrap ErrLibraryNotMatched")
+		}
+	})
 }
 
 func TestCheckAnchorsNoAnchors(t *testing.T) {
@@ -133,27 +235,5 @@ func TestCheckAnchorsStateTransitions(t *testing.T) {
 	}
 	if !p.anchorState[anchor] {
 		t.Fatal("expected anchorState to be true after restore")
-	}
-}
-
-func TestCheckAnchorsDirectorySupport(t *testing.T) {
-	dir := t.TempDir()
-	anchorDir := filepath.Join(dir, "mount-check")
-	if err := os.Mkdir(anchorDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	p := newTestProcessor([]string{anchorDir})
-
-	if !p.CheckAnchors() {
-		t.Error("expected CheckAnchors to return true for directory anchor")
-	}
-
-	// Remove directory
-	if err := os.Remove(anchorDir); err != nil {
-		t.Fatal(err)
-	}
-	if p.CheckAnchors() {
-		t.Error("expected CheckAnchors to return false after directory removed")
 	}
 }

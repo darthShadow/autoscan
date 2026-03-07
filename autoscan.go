@@ -57,6 +57,12 @@ func LimitReadCloser(rc io.ReadCloser) io.ReadCloser {
 }
 
 var (
+	// ErrLibraryNotMatched is returned by a target's Scan method when the
+	// scan folder does not match any of the target's known libraries.
+	// The processor uses this to distinguish "no match" (expected in
+	// non-overlapping setups) from real errors.
+	ErrLibraryNotMatched = errors.New("no matching library")
+
 	// ErrTargetUnavailable may occur when a Target goes offline
 	// or suffers from fatal errors. In this case, the processor
 	// will halt operations until the target is back online.
