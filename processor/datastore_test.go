@@ -326,6 +326,25 @@ func TestDelete(t *testing.T) {
 				{Folder: "2"},
 			},
 		},
+		{
+			Name: "Deletes the dispatched row when its time is unchanged",
+			GiveScans: []autoscan.Scan{
+				{Folder: "1", Time: 1000},
+			},
+			GiveDelete: autoscan.Scan{Folder: "1", Time: 1000},
+			WantScans:  nil,
+		},
+		{
+			Name: "Keeps a row updated after dispatch",
+			GiveScans: []autoscan.Scan{
+				{Folder: "1", Time: 1000},
+				{Folder: "1", Time: 2801},
+			},
+			GiveDelete: autoscan.Scan{Folder: "1", Time: 1000},
+			WantScans: []autoscan.Scan{
+				{Folder: "1", Time: 2801},
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -347,8 +366,7 @@ func TestDelete(t *testing.T) {
 			}
 
 			if !reflect.DeepEqual(scans, tc.WantScans) {
-				t.Log(scans)
-				t.Error("Scans do not match")
+				t.Errorf("scans = %#v, want %#v", scans, tc.WantScans)
 			}
 		})
 	}

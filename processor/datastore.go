@@ -156,11 +156,13 @@ func (store *datastore) GetAll() ([]autoscan.Scan, error) {
 }
 
 const sqlDelete = `
-DELETE FROM scan WHERE folder=?
+DELETE FROM scan WHERE folder=? AND time=?
 `
 
+// Delete removes the dispatched row only while its time is unchanged: a request
+// admitted during dispatch carries a later time, and its row stays queued.
 func (store *datastore) Delete(scan autoscan.Scan) error {
-	_, err := store.db.RW().ExecContext(context.Background(), sqlDelete, scan.Folder)
+	_, err := store.db.RW().ExecContext(context.Background(), sqlDelete, scan.Folder, scan.Time)
 	if err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}

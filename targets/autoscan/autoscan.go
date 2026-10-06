@@ -55,7 +55,7 @@ func (t target) Scan(scan autoscan.Scan) error {
 
 	scanPath := ""
 	if scan.RelativePath != "" {
-		scanPath = path.Join(scan.Folder, scan.RelativePath)
+		scanPath = path.Join(scanFolder, scan.RelativePath)
 	}
 
 	// send scan request

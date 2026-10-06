@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudbox/autoscan"
 	"github.com/cloudbox/autoscan/stats"
@@ -142,6 +144,57 @@ func TestCallTargets(t *testing.T) {
 			t.Error("returned error must not wrap ErrLibraryNotMatched")
 		}
 	})
+}
+
+func TestProcessDeleteDispatchedScan(t *testing.T) {
+	currentTime := time.Now()
+	oldScan := autoscan.Scan{Folder: "/media/movies", Time: currentTime.Add(-2 * time.Hour).Unix()}
+	laterScan := autoscan.Scan{Folder: oldScan.Folder, Time: currentTime.Unix()}
+
+	testCases := []struct {
+		Name                string
+		AdmitDuringDispatch bool
+		WantScans           []autoscan.Scan
+	}{
+		{
+			Name:                "Request arrives during dispatch",
+			AdmitDuringDispatch: true,
+			WantScans:           []autoscan.Scan{laterScan},
+		},
+		{
+			Name:      "Nothing arrives during dispatch",
+			WantScans: nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			p := newTestProcessor(nil)
+			p.store = getDatastore(t)
+			p.minimumAge = time.Hour
+			if err := p.Add(oldScan); err != nil {
+				t.Fatalf("Add seed error = %v, want nil", err)
+			}
+
+			target := &mockTarget{scanFn: func(scan autoscan.Scan) error {
+				if tc.AdmitDuringDispatch {
+					return p.Add(autoscan.Scan{Folder: scan.Folder, Time: laterScan.Time})
+				}
+				return nil
+			}}
+			if err := p.Process([]autoscan.Target{target}); err != nil {
+				t.Fatalf("Process error = %v, want nil", err)
+			}
+
+			scans, err := p.store.GetAll()
+			if err != nil {
+				t.Fatalf("GetAll error = %v, want nil", err)
+			}
+			if !reflect.DeepEqual(scans, tc.WantScans) {
+				t.Errorf("scans = %#v, want %#v", scans, tc.WantScans)
+			}
+		})
+	}
 }
 
 func TestCheckAnchorsNoAnchors(t *testing.T) {
