@@ -43,6 +43,8 @@ tasks:
     sources:
       - '**/*.go'
       - ./go.sum
+    generates:
+      - vendor/modules.txt
     cmds:
       - go mod vendor
       - go mod tidy
