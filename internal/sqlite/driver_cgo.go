@@ -21,6 +21,14 @@ func init() {
 				"PRAGMA temp_store=MEMORY",
 				"PRAGMA mmap_size=8589934592",
 				"PRAGMA threads=8",
+				// Limit retained journal size to 64 MiB.
+				// https://sqlite.org/pragma.html#pragma_journal_size_limit
+				// Source: sqlite3-builds src/auto_extension.c.
+				"PRAGMA journal_size_limit=67108864",
+				// Checkpoint the WAL after 16000 pages.
+				// https://sqlite.org/pragma.html#pragma_wal_autocheckpoint
+				// Source: sqlite3-builds src/auto_extension.c.
+				"PRAGMA wal_autocheckpoint=16000",
 			} {
 				if _, err := conn.Exec(query, nil); err != nil {
 					return fmt.Errorf("failed to execute query %q: %w", query, err)
@@ -57,17 +65,19 @@ func getDSN(dbPath string, writable bool) string {
 	// https://sqlite.org/pragma.html#pragma_locking_mode
 	params.Set("_locking_mode", "NORMAL")
 
-	// Set the cache size to 128MB.
+	// Set the cache size to 1 GiB.
 	// https://sqlite.org/pragma.html#pragma_cache_size
-	params.Set("_cache_size", "-131072")
+	// Source: sqlite3-builds src/auto_extension.c.
+	params.Set("_cache_size", "-1048576")
 
 	// Enable foreign key constraints.
 	// https://sqlite.org/foreignkeys.html
 	params.Set("_foreign_keys", "ON")
 
-	// Set busy timeout to 1 second.
+	// Set busy timeout to 10 seconds.
 	// https://sqlite.org/pragma.html#pragma_busy_timeout
-	params.Set("_busy_timeout", "1000")
+	// Source: sqlite3-builds src/auto_extension.c.
+	params.Set("_busy_timeout", "10000")
 
 	if writable {
 		// Enable WAL mode for better performance.

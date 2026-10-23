@@ -193,7 +193,7 @@ func TestHandler(t *testing.T) {
 			server := httptest.NewServer(trigger(callback))
 			defer server.Close()
 
-			req, err := http.NewRequest(http.MethodPost, server.URL, http.NoBody)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL, http.NoBody)
 			if err != nil {
 				t.Fatalf("Failed creating request: %v", err)
 			}

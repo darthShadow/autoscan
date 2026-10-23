@@ -3,6 +3,7 @@ package autoscan
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 )
@@ -63,6 +64,12 @@ var (
 	// non-overlapping setups) from real errors.
 	ErrLibraryNotMatched = errors.New("no matching library")
 
+	// ErrScanRejected is returned by any target request that gets an
+	// unlisted 4xx response. From Scan, the processor consumes the scan
+	// without retrying it; from an availability check, the CLI treats the
+	// target as unavailable and retries.
+	ErrScanRejected = errors.New("scan rejected")
+
 	// ErrTargetUnavailable may occur when a Target goes offline
 	// or suffers from fatal errors. In this case, the processor
 	// will halt operations until the target is back online.
@@ -75,3 +82,23 @@ var (
 	// should sleep longer depending on the processor output.
 	ErrNoScans = errors.New("no scans currently available")
 )
+
+// TargetResponseError classifies a non-2xx target response using its status code
+// and status text. unauthorizedMessage preserves the target's 401 diagnostic.
+// The returned error wraps ErrFatal, ErrTargetUnavailable, or ErrScanRejected.
+func TargetResponseError(statusCode int, status, unauthorizedMessage string) error {
+	switch {
+	case statusCode == http.StatusUnauthorized:
+		return fmt.Errorf("%s: %s: %w", unauthorizedMessage, status, ErrFatal)
+	case statusCode == http.StatusForbidden:
+		return fmt.Errorf("%s: %w", status, ErrFatal)
+	case statusCode == http.StatusNotFound,
+		statusCode == http.StatusTooManyRequests,
+		statusCode >= http.StatusInternalServerError && statusCode < http.StatusInternalServerError+100:
+		return fmt.Errorf("%s: %w", status, ErrTargetUnavailable)
+	case statusCode >= http.StatusBadRequest && statusCode < http.StatusInternalServerError:
+		return fmt.Errorf("%s: %w", status, ErrScanRejected)
+	default:
+		return fmt.Errorf("%s: %w", status, ErrFatal)
+	}
+}

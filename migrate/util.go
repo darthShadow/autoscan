@@ -1,12 +1,13 @@
 package migrate
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"embed"
 	"fmt"
 	"path/filepath"
-	"sort"
+	"slices"
 )
 
 type migration struct {
@@ -120,8 +121,8 @@ func (m *Migrator) parse(fsys *embed.FS) ([]*migration, error) {
 	}
 
 	// sort migrations
-	sort.Slice(migrations, func(i, j int) bool {
-		return migrations[i].Version < migrations[j].Version
+	slices.SortFunc(migrations, func(a, b *migration) int {
+		return cmp.Compare(a.Version, b.Version)
 	})
 
 	return migrations, nil

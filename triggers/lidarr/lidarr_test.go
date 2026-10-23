@@ -129,7 +129,12 @@ func TestHandler(t *testing.T) {
 				t.Fatalf("Could not open the fixture: %s", tc.Given.Fixture)
 			}
 
-			res, err := http.Post(server.URL, "application/json", request)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL, request)
+			if err != nil {
+				t.Fatalf("Create request: %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			res, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatalf("Request failed: %v", err)
 			}

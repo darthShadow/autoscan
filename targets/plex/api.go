@@ -46,25 +46,15 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 	}
 
 	c.log.Trace().
-		Stringer("request_url", res.Request.URL).
-		Int("response_status", res.StatusCode).
-		Msg("Request failed")
+		Stringer("request-url", res.Request.URL).
+		Int("response-status", res.StatusCode).
+		Msg("Request Failed")
 
 	// statusCode not in the 2xx range, close response
 	_ = res.Body.Close()
 
-	switch res.StatusCode {
-	case http.StatusUnauthorized:
-		return nil, fmt.Errorf("invalid plex token: %s: %w", res.Status, autoscan.ErrFatal)
-	case http.StatusNotFound,
-		http.StatusInternalServerError,
-		http.StatusBadGateway,
-		http.StatusServiceUnavailable,
-		http.StatusGatewayTimeout:
-		return nil, fmt.Errorf("%s: %w", res.Status, autoscan.ErrTargetUnavailable)
-	default:
-		return nil, fmt.Errorf("%s: %w", res.Status, autoscan.ErrFatal)
-	}
+	return nil, fmt.Errorf("request failed: %w",
+		autoscan.TargetResponseError(res.StatusCode, res.Status, "invalid plex token"))
 }
 
 func (c apiClient) Version() (string, error) {
@@ -175,7 +165,7 @@ func (c apiClient) Scan(path string, libraryID int) error {
 
 	res, err := c.do(req)
 	if err != nil {
-		return fmt.Errorf("scan: %w", err)
+		return fmt.Errorf("plex scan: %w", err)
 	}
 
 	_ = res.Body.Close()

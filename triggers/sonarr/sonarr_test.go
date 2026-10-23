@@ -1,12 +1,13 @@
 package sonarr
 
 import (
+	"cmp"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"reflect"
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
@@ -23,14 +24,14 @@ func scansEqual(expected, actual []autoscan.Scan) bool {
 	sortScans := func(scans []autoscan.Scan) []autoscan.Scan {
 		sorted := make([]autoscan.Scan, len(scans))
 		copy(sorted, scans)
-		sort.Slice(sorted, func(i, j int) bool {
-			if sorted[i].Folder != sorted[j].Folder {
-				return sorted[i].Folder < sorted[j].Folder
+		slices.SortFunc(sorted, func(a, b autoscan.Scan) int {
+			if order := cmp.Compare(a.Folder, b.Folder); order != 0 {
+				return order
 			}
-			if sorted[i].RelativePath != sorted[j].RelativePath {
-				return sorted[i].RelativePath < sorted[j].RelativePath
+			if order := cmp.Compare(a.RelativePath, b.RelativePath); order != 0 {
+				return order
 			}
-			return sorted[i].Priority < sorted[j].Priority
+			return cmp.Compare(a.Priority, b.Priority)
 		})
 		return sorted
 	}
@@ -216,7 +217,12 @@ func TestHandler(t *testing.T) {
 				t.Fatalf("Could not open the fixture: %s", tc.Given.Fixture)
 			}
 
-			res, err := http.Post(server.URL, "application/json", request)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL, request)
+			if err != nil {
+				t.Fatalf("Create request: %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			res, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatalf("Request failed: %v", err)
 			}

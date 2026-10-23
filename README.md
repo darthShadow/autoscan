@@ -365,6 +365,7 @@ Autoscan currently supports the following targets:
 - Plex
 - Emby
 - Jellyfin
+- Silo
 - Autoscan
 
 ### Plex
@@ -431,6 +432,26 @@ targets:
 - Token. We need a Jellyfin API Token to make requests on your behalf. [This article](https://github.com/MediaBrowser/Emby/wiki/Api-Key-Authentication) should help you out. \
   *It's a bit out of date, but I'm sure you will manage!*
 - Rewrite. If Jellyfin is not running on the host OS, but in a Docker container (or Autoscan is running in a Docker container), then you need to rewrite paths accordingly. Check out our [rewriting section](#rewriting-paths) for more info.
+
+### Silo
+
+Use Silo's native API listener, not its Jellyfin compatibility port:
+
+```yaml
+targets:
+  silo:
+    - url: http://silo.domain.tld:8080 # Silo native API listener (not the Jellyfin compat port)
+      token: <SILO_API_KEY>            # unscoped sa_ key owned by an enabled admin
+```
+
+The token must be an unscoped `sa_` API key owned by an enabled admin.
+The target sends the scan folder to `/api/v2/scan`.
+It logs the accepted `mode` and library, or Silo's reason when a scan is rejected.
+Removed folders are rejected; Silo's scheduled scans handle those removals.
+
+The library list is read only at startup. Restart autoscan after changing Silo libraries.
+A scan can reach Silo more than once if an answer is lost or another target is unavailable.
+Configure Silo as `silo` only. Also configuring it as `jellyfin` sends two scans per change.
 
 ### Autoscan
 
@@ -513,6 +534,10 @@ targets:
       rewrite:
         - from: /mnt/unionfs/Media/ # local file system
           to: /data/ # path accessible by the Emby docker container (if applicable)
+
+  silo:
+    - url: http://silo.domain.tld:8080 # Silo native API listener (not the Jellyfin compat port)
+      token: <SILO_API_KEY>            # unscoped sa_ key owned by an enabled admin
 ```
 
 ## Other configuration options

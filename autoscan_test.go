@@ -2,10 +2,47 @@ package autoscan
 
 import (
 	"bytes"
+	"errors"
 	"io"
+	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestTargetResponseError(t *testing.T) {
+	tests := []struct {
+		status int
+		want   error
+	}{
+		{http.StatusUnauthorized, ErrFatal},
+		{http.StatusForbidden, ErrFatal},
+		{http.StatusNotFound, ErrTargetUnavailable},
+		{http.StatusBadRequest, ErrScanRejected},
+		{http.StatusConflict, ErrScanRejected},
+		{http.StatusUnprocessableEntity, ErrScanRejected},
+		{http.StatusTooManyRequests, ErrTargetUnavailable},
+		{http.StatusInternalServerError, ErrTargetUnavailable},
+		{http.StatusServiceUnavailable, ErrTargetUnavailable},
+		{599, ErrTargetUnavailable},
+		{http.StatusFound, ErrFatal},
+	}
+	for _, tc := range tests {
+		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
+			status := strconv.Itoa(tc.status) + " " + http.StatusText(tc.status)
+			err := TargetResponseError(tc.status, status, "invalid test token")
+			if !errors.Is(err, tc.want) {
+				t.Errorf("TargetResponseError(%d) = %v, want %v", tc.status, err, tc.want)
+			}
+			if !strings.Contains(err.Error(), status) {
+				t.Errorf("error = %q, want response status %q", err, status)
+			}
+			if tc.status == http.StatusUnauthorized && !strings.Contains(err.Error(), "invalid test token") {
+				t.Errorf("error = %q, want target authentication message", err)
+			}
+		})
+	}
+}
 
 func TestLimitReadCloserTruncates(t *testing.T) {
 	overSize := maxResponseBodySize + 1024

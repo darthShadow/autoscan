@@ -142,7 +142,12 @@ func TestHandler(t *testing.T) {
 			}
 
 			url := fmt.Sprintf("%s/triggers/a-train/%s", server.URL, tc.Given.ID)
-			res, err := http.Post(url, "application/json", request)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, request)
+			if err != nil {
+				t.Fatalf("Create request: %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			res, err := http.DefaultClient.Do(req)
 			if err != nil {
 				t.Fatalf("Request failed: %v", err)
 			}

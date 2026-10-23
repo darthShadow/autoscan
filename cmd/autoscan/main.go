@@ -30,6 +30,7 @@ import (
 	"github.com/cloudbox/autoscan/targets/emby"
 	"github.com/cloudbox/autoscan/targets/jellyfin"
 	"github.com/cloudbox/autoscan/targets/plex"
+	"github.com/cloudbox/autoscan/targets/silo"
 	atrain "github.com/cloudbox/autoscan/triggers/a_train"
 	"github.com/cloudbox/autoscan/triggers/bernard"
 	"github.com/cloudbox/autoscan/triggers/inotify"
@@ -55,7 +56,7 @@ const (
 
 type authConfig struct {
 	Username string `yaml:"username"`
-	Password string `yaml:"password"` //nolint:gosec // user-provided credential field
+	Password string `yaml:"password"`
 }
 
 type triggersConfig struct {
@@ -74,6 +75,7 @@ type targetsConfig struct {
 	Emby     []emby.Config     `yaml:"emby"`
 	Jellyfin []jellyfin.Config `yaml:"jellyfin"`
 	Plex     []plex.Config     `yaml:"plex"`
+	Silo     []silo.Config     `yaml:"silo"`
 }
 
 type config struct {
@@ -205,6 +207,7 @@ func main() {
 		Int("plex", len(cfg.Targets.Plex)).
 		Int("emby", len(cfg.Targets.Emby)).
 		Int("jellyfin", len(cfg.Targets.Jellyfin)).
+		Int("silo", len(cfg.Targets.Silo)).
 		Msg("Targets Initialised")
 
 	// scan stats
@@ -240,7 +243,7 @@ func initProcessor(cfg config, db *sqlite.DB, procStats *stats.Stats) *processor
 	}
 
 	log.Info().
-		Stringer("min_age", cfg.MinimumAge).
+		Stringer("min-age", cfg.MinimumAge).
 		Strs("anchors", cfg.Anchors).
 		Msg("Processor Initialised")
 
@@ -293,9 +296,9 @@ func notifyReady(proc *processor.Processor) {
 
 	sdOK, err := daemon.SdNotify(false, daemon.SdNotifyReady)
 	if err != nil {
-		log.Warn().Err(err).Msg("sd_notify Failed")
+		log.Warn().Err(err).Msg("Systemd Notify Failed")
 	} else if sdOK {
-		log.Info().Msg("sd_notify Ready Sent")
+		log.Info().Msg("Systemd Notify Ready Sent")
 	}
 
 	sigCh := make(chan os.Signal, 1)
@@ -408,7 +411,8 @@ func initDaemonTriggers(cfg config, db *sqlite.DB, add autoscan.ProcessorFunc) {
 // initTargets builds the list of scan targets from the config.
 // Calls log.Fatal on any initialisation error.
 func initTargets(cfg config) []autoscan.Target {
-	targetCount := len(cfg.Targets.Autoscan) + len(cfg.Targets.Plex) + len(cfg.Targets.Emby) + len(cfg.Targets.Jellyfin)
+	targetCount := len(cfg.Targets.Autoscan) + len(cfg.Targets.Plex) + len(cfg.Targets.Emby) +
+		len(cfg.Targets.Jellyfin) + len(cfg.Targets.Silo)
 	targets := make([]autoscan.Target, 0, targetCount)
 
 	for _, t := range cfg.Targets.Autoscan {
@@ -417,7 +421,7 @@ func initTargets(cfg config) []autoscan.Target {
 			log.Fatal().
 				Err(err).
 				Str("target", "autoscan").
-				Str("target_url", t.URL).
+				Str("target-url", t.URL).
 				Msg("Target Init Failed")
 		}
 
@@ -430,7 +434,7 @@ func initTargets(cfg config) []autoscan.Target {
 			log.Fatal().
 				Err(err).
 				Str("target", "plex").
-				Str("target_url", t.URL).
+				Str("target-url", t.URL).
 				Msg("Target Init Failed")
 		}
 
@@ -443,7 +447,7 @@ func initTargets(cfg config) []autoscan.Target {
 			log.Fatal().
 				Err(err).
 				Str("target", "emby").
-				Str("target_url", t.URL).
+				Str("target-url", t.URL).
 				Msg("Target Init Failed")
 		}
 
@@ -456,7 +460,20 @@ func initTargets(cfg config) []autoscan.Target {
 			log.Fatal().
 				Err(err).
 				Str("target", "jellyfin").
-				Str("target_url", t.URL).
+				Str("target-url", t.URL).
+				Msg("Target Init Failed")
+		}
+
+		targets = append(targets, target)
+	}
+
+	for _, t := range cfg.Targets.Silo {
+		target, err := silo.New(t)
+		if err != nil {
+			log.Fatal().
+				Err(err).
+				Str("target", "silo").
+				Str("target-url", t.URL).
 				Msg("Target Init Failed")
 		}
 

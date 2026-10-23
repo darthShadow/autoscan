@@ -46,7 +46,7 @@ jobs:
       - name: go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.25
+          go-version-file: go.mod
 
       - name: go info
         run: |
@@ -70,6 +70,13 @@ jobs:
           path: .task/**/*
           key: ${{ runner.os }}-go-task
 
+      # Verify module metadata before the vendor task can rewrite it.
+      - name: tidy check
+        run: go mod tidy -diff
+
+      - name: format check
+        run: go tool golangci-lint fmt --diff ./...
+
       # vendor
       - name: vendor
         run: |
@@ -78,6 +85,17 @@ jobs:
       # lint
       - name: lint
         run: task lint
+
+      # goreleaser builds with CGO_ENABLED=0, which compiles internal/sqlite/driver_static.go instead of driver_cgo.go
+      - name: lint release variant
+        run: CGO_ENABLED=0 go tool golangci-lint run ./...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: rule tests
+        working-directory: rules
+        run: go test ./...
 
       # test
       - name: tests

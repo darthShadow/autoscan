@@ -145,6 +145,8 @@ func (*Processor) callTargets(targets []autoscan.Target, scan autoscan.Scan) err
 			matched++
 		case errors.Is(err, autoscan.ErrLibraryNotMatched):
 			skipped++
+		case errors.Is(err, autoscan.ErrScanRejected):
+			log.Warn().Err(err).Str("folder", scan.Folder).Msg("Target Rejected Scan")
 		default:
 			if firstErr == nil {
 				firstErr = err
@@ -159,7 +161,7 @@ func (*Processor) callTargets(targets []autoscan.Target, scan autoscan.Scan) err
 	if matched == 0 && skipped > 0 {
 		log.Warn().
 			Str("folder", scan.Folder).
-			Int("targets_skipped", skipped).
+			Int("targets-skipped", skipped).
 			Msg("No Targets Matched Scan")
 	}
 

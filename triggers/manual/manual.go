@@ -110,7 +110,7 @@ func (h handler) ServeHTTP(writer http.ResponseWriter, r *http.Request) {
 	for _, scan := range scans {
 		rlog.Info().
 			Str("path", scan.Folder).
-			Str("relative_path", scan.RelativePath).
+			Str("relative-path", scan.RelativePath).
 			Msg("Scan Enqueued")
 	}
 }

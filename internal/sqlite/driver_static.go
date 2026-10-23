@@ -1,31 +1,51 @@
 //go:build !cgo
-// +build !cgo
 
 package sqlite
 
 import (
+	"context"
 	"database/sql"
+	sqldriver "database/sql/driver"
 	"fmt"
 	"net/url"
 
-	_ "github.com/ncruces/go-sqlite3/driver"
-	_ "github.com/ncruces/go-sqlite3/embed"
+	"github.com/ncruces/go-sqlite3"
+	"github.com/ncruces/go-sqlite3/driver"
+	"github.com/ncruces/go-sqlite3/ext/fts5"
 )
 
-const (
-	driverName = "sqlite3"
-)
+// maxConnMemory holds the 1 GiB cache, the 1 GiB mmap region, and working memory.
+// On Unix, ncruces reserves this address space with PROT_NONE and commits only what it uses.
+const maxConnMemory = 1 << 32
+
+type memoryConnector struct {
+	sqldriver.Connector
+}
+
+func (connector memoryConnector) Connect(ctx context.Context) (sqldriver.Conn, error) {
+	conn, err := connector.Connector.Connect(sqlite3.WithMaxMemory(ctx, maxConnMemory))
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite db: %w", err)
+	}
+	return conn, nil
+}
+
+func init() {
+	// Enable FTS5 only in pure-Go builds; the cgo (mattn) build does not enable it.
+	sqlite3.AutoExtension(fts5.Register)
+}
 
 // getDSN returns a DSN string for the SQLite database.
 // writable is true if the database is writable, false otherwise.
 // Source: https://github.com/nalgeon/redka/blob/017c0b28f7685311c3948b2e6a531012c8092bd3/internal/sqlx/db.go#L173
+//
+//nolint:revive // writable bool is essential: it selects between two distinct DSN construction paths (RO vs RW)
 func getDSN(dbPath string, writable bool) string {
-	dsn := fmt.Sprintf("file:%s", dbPath)
+	dsn := "file:" + dbPath
 
 	params := url.Values{}
 
-	// sql.DB is concurrent-safe, so we don't need SQLite mutexes.
-	// TODO: Investigate if this is used.
+	// The ncruces driver ignores _mutex; kept for parity with driver_cgo.go.
 	params.Set("_mutex", "no")
 
 	// Disable the shared cache.
@@ -41,17 +61,29 @@ func getDSN(dbPath string, writable bool) string {
 	// https://sqlite.org/pragma.html#pragma_locking_mode
 	params.Add("_pragma", "locking_mode(NORMAL)")
 
-	// Set the cache size to 128MB.
+	// Set the cache size to 1 GiB.
 	// https://sqlite.org/pragma.html#pragma_cache_size
-	params.Add("_pragma", "cache_size(-131072)")
+	// Source: sqlite3-builds src/auto_extension.c.
+	params.Add("_pragma", "cache_size(-1048576)")
+
+	// Limit retained journal size to 64 MiB.
+	// https://sqlite.org/pragma.html#pragma_journal_size_limit
+	// Source: sqlite3-builds src/auto_extension.c.
+	params.Add("_pragma", "journal_size_limit(67108864)")
+
+	// Checkpoint the WAL after 16000 pages.
+	// https://sqlite.org/pragma.html#pragma_wal_autocheckpoint
+	// Source: sqlite3-builds src/auto_extension.c.
+	params.Add("_pragma", "wal_autocheckpoint(16000)")
 
 	// Enable foreign key constraints.
 	// https://sqlite.org/foreignkeys.html
 	params.Add("_pragma", "foreign_keys(ON)")
 
-	// Set busy timeout to 1 second.
+	// Set busy timeout to 10 seconds.
 	// https://sqlite.org/pragma.html#pragma_busy_timeout
-	params.Add("_pragma", "busy_timeout(1000)")
+	// Source: sqlite3-builds src/auto_extension.c.
+	params.Add("_pragma", "busy_timeout(10000)")
 
 	// Set temp store to memory.
 	// https://sqlite.org/pragma.html#pragma_temp_store
@@ -83,7 +115,6 @@ func getDSN(dbPath string, writable bool) string {
 		// https://sqlite.org/lang_transaction.html
 		//goland:noinspection SpellCheckingInspection
 		params.Set("_txlock", "immediate")
-
 	} else {
 		// Prevent data-changes on the database.
 		// https://sqlite.org/pragma.html#pragma_query_only
@@ -98,7 +129,12 @@ func getDSN(dbPath string, writable bool) string {
 	return dsn + "?" + params.Encode()
 }
 
+// OpenDB opens a SQLite database at dbPath; set writable to true for the read-write connection.
 func OpenDB(dbPath string, writable bool) (*sql.DB, error) {
 	dsn := getDSN(dbPath, writable)
-	return sql.Open(driverName, dsn)
+	connector, err := (&driver.SQLite{}).OpenConnector(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite db: %w", err)
+	}
+	return sql.OpenDB(memoryConnector{connector}), nil
 }

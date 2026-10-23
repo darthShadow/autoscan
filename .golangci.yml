@@ -37,6 +37,7 @@ linters:
     # Context & Logging
     - contextcheck    # Context.Context passing validation
     - fatcontext      # Nested context in loops/closures
+    - sloglint        # Structured logging (slog/logutil) validation
     # Resources
     - bodyclose       # HTTP response body closed
     - noctx           # HTTP requests without context
@@ -89,6 +90,7 @@ linters:
     - whitespace      # Blank lines at block boundaries (auto-fixable)
     # Zerolog
     - zerologlint     # Zerolog dispatch validation
+    # No depguard linter: its only goland rule targets absent cephmonitor packages.
 
   # Exclusions configuration (v2 format)
   exclusions:
@@ -96,6 +98,7 @@ linters:
     presets: []
     generated: strict      # Properly skip generated code
     warn-unused: true      # Catch stale exclusion rules
+    # The standalone fork has no references/ directory.
     # Exclude rules for specific paths
     rules:
       - path: _test\.go
@@ -106,31 +109,11 @@ linters:
           - gosec
           - goconst
           - varnamelen
-          - noctx        # Test HTTP requests don't need context
-          - tagliatelle  # Test structs may embed external-format tags
-      # JSON tags in these files are dictated by external API contracts
-      # and cannot be changed to match the configured snake_case convention.
-      - path: targets/plex/api\.go
-        linters:
-          - tagliatelle  # Tags match Plex API format (PascalCase)
-      - path: targets/emby/api\.go
-        linters:
-          - tagliatelle  # Tags match Emby API format (PascalCase)
-      - path: targets/jellyfin/api\.go
-        linters:
-          - tagliatelle  # Tags match Jellyfin API format (PascalCase)
-      - path: triggers/sonarr/sonarr\.go
-        linters:
-          - tagliatelle  # Tags match Sonarr webhook format (camelCase)
-      - path: triggers/radarr/radarr\.go
-        linters:
-          - tagliatelle  # Tags match Radarr webhook format (camelCase)
-      - path: triggers/readarr/readarr\.go
-        linters:
-          - tagliatelle  # Tags match Readarr webhook format (camelCase)
-      - path: triggers/lidarr/lidarr\.go
-        linters:
-          - tagliatelle  # Tags match Lidarr webhook format (camelCase)
+      # External API and webhook JSON keys are fixed wire formats.
+      - path: ^targets/(plex|emby|jellyfin)/api\.go$
+        linters: [tagliatelle]
+      - path: ^triggers/(sonarr|radarr|readarr|lidarr)/[^/]+\.go$
+        linters: [tagliatelle]
 
   # Configure checks. Mostly using defaults but with some commented exceptions.
   settings:
@@ -184,6 +167,7 @@ linters:
         - newDeref
         - offBy1
         - regexpMust
+        - ruleguard # Enable additional check that are not enabled by default
         #- singleCaseSwitch # Skip default
         - sloppyLen
         - sloppyTypeAssert
@@ -223,6 +207,10 @@ linters:
         - timeExprSimplify
         - unnecessaryBlock
         - unnecessaryDefer
+      settings:
+        ruleguard:
+          # Fork-local rules retain zerolog and omit the two logutil rules.
+          rules: ${base-path}/rules/rules.go
     revive:
       # Enable all rules, then selectively disable
       enable-all-rules: true
@@ -239,6 +227,15 @@ linters:
         - name: unreachable-code
           disabled: true
         - name: unused-parameter
+          disabled: true
+        # revive v1.15.0 type-checks without module imports; these two rules then return an internal
+        # failure that silently stops all later rules for the file, so findings vanish at random
+        # (https://github.com/mgechev/revive/issues/1718, fixed in revive v1.16.0).
+        # Re-check on the next golangci-lint version bump and remove both entries once it bundles the fix:
+        # https://github.com/golangci/golangci-lint/pull/6747
+        - name: epoch-naming
+          disabled: true
+        - name: inefficient-map-lookup
           disabled: true
         # Disable rules covered by dedicated linters
         - name: cognitive-complexity
@@ -311,6 +308,15 @@ linters:
       confidence: medium
       excludes:
         - G104  # Covered by errcheck
+    sloglint:
+      # Enforce typed attributes (slog.String(), slog.Int(), etc.)
+      attr-only: true
+      # Enforce context-based logging ("all" or "scope")
+      context: "all"
+      # Enforce static keys (no variables as keys)
+      static-msg: true
+      # Enforce kebab-case for log keys (e.g. "file-path", "media-type")
+      key-naming-case: kebab
     perfsprint:
       # Suggest faster alternatives to fmt.Sprintf
       int-conversion: true  # fmt.Sprintf("%d", i) → strconv.Itoa(i)
@@ -356,8 +362,8 @@ linters:
       # Struct tag naming consistency
       case:
         rules:
-          json: snake   # Enforce snake_case for JSON
-          yaml: kebab   # Enforce kebab-case for YAML
+          json: snake # Enforce snake_case for JSON
+          yaml: kebab # Enforce kebab-case for YAML
     varnamelen:
       min-name-length: 3
       max-distance: 10
@@ -406,14 +412,17 @@ formatters:
       sections:
         - standard                           # stdlib
         - default                            # third-party
-        - prefix(github.com/cloudbox)        # project packages
-        - localmodule                        # local module imports
+        - prefix(github.com/darthshadow)     # goland packages; kept for parity with goland, none imported here
+        - localmodule                        # this module's own packages (github.com/cloudbox/autoscan)
       custom-order: true
     gofumpt:
+      # Kept for parity with goland's config, where media-manager imports its own dotless path; no effect here.
+      module-path: media-manager
       extra-rules: true
   exclusions:
     generated: strict
     warn-unused: true
+    # The standalone fork has no references/ directory.
 
 issues:
   # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
@@ -424,6 +433,6 @@ issues:
 run:
   # Timeout for total work, e.g. 30s, 5m, 5m30s. Default is 0 (disabled).
   timeout: 10m
-  modules-download-mode: vendor         # Use vendored dependencies
-  allow-parallel-runners: true          # Dev ergonomics
-  allow-serial-runners: true            # Dev ergonomics
+  modules-download-mode: readonly   # Standalone lint uses modules, not vendor
+  allow-parallel-runners: true      # Dev ergonomics
+  allow-serial-runners: true        # Dev ergonomics

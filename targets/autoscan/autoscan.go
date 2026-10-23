@@ -13,7 +13,7 @@ import (
 type Config struct {
 	URL       string             `yaml:"url"`
 	User      string             `yaml:"username"`
-	Pass      string             `yaml:"password"` //nolint:gosec // user-provided credential, not a hardcoded secret
+	Pass      string             `yaml:"password"`
 	Rewrite   []autoscan.Rewrite `yaml:"rewrite"`
 	Verbosity string             `yaml:"verbosity"`
 }

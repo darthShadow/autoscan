@@ -146,6 +146,31 @@ func TestCallTargets(t *testing.T) {
 	})
 }
 
+func TestProcessDeletesRejectedScan(t *testing.T) {
+	p := newTestProcessor(nil)
+	p.store = getDatastore(t)
+	scan := autoscan.Scan{Folder: "/media/movies", Time: time.Now().Add(-time.Hour).Unix()}
+	if err := p.Add(scan); err != nil {
+		t.Fatalf("Add error = %v, want nil", err)
+	}
+	targets := []autoscan.Target{
+		&mockTarget{scanFn: func(_ autoscan.Scan) error {
+			return fmt.Errorf("400 Bad Request: %w", autoscan.ErrScanRejected)
+		}},
+		&mockTarget{scanFn: func(_ autoscan.Scan) error { return nil }},
+	}
+	if err := p.Process(targets); err != nil {
+		t.Fatalf("Process error = %v, want nil", err)
+	}
+	scans, err := p.store.GetAll()
+	if err != nil {
+		t.Fatalf("GetAll error = %v, want nil", err)
+	}
+	if len(scans) != 0 {
+		t.Errorf("remaining scans = %#v, want none", scans)
+	}
+}
+
 func TestProcessDeleteDispatchedScan(t *testing.T) {
 	currentTime := time.Now()
 	oldScan := autoscan.Scan{Folder: "/media/movies", Time: currentTime.Add(-2 * time.Hour).Unix()}

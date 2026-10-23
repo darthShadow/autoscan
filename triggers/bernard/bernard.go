@@ -226,7 +226,7 @@ func (d daemon) runSyncWithWatchdog(driveID string, syncFn func() error) error {
 	case err := <-done:
 		return err
 	case <-time.After(syncWatchdogTimeout):
-		d.log.Warn().Str("drive_id", driveID).
+		d.log.Warn().Str("drive-id", driveID).
 			Dur("elapsed", syncWatchdogTimeout).
 			Msg("Sync Watchdog")
 		return <-done
@@ -424,8 +424,8 @@ func (d daemon) getScanTask(drive *drive, paths *Paths) *scanTask {
 func (d daemon) withDriveLog(driveID string) zerolog.Logger {
 	drive, err := d.store.GetDrive(driveID)
 	if err != nil {
-		return d.log.With().Str("drive_id", driveID).Logger()
+		return d.log.With().Str("drive-id", driveID).Logger()
 	}
 
-	return d.log.With().Str("drive_id", driveID).Str("drive_name", drive.Name).Logger()
+	return d.log.With().Str("drive-id", driveID).Str("drive-name", drive.Name).Logger()
 }
