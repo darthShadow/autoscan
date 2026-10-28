@@ -7,7 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -338,5 +341,156 @@ func TestAvailable(t *testing.T) {
 				t.Errorf("Available error = %v, want silo availability prefix", err)
 			}
 		})
+	}
+}
+
+func TestScanFolderRule(t *testing.T) {
+	root := t.TempDir()
+	movie := filepath.Join(root, "movies", "4k-en", "Movie (2020)")
+	dotted := filepath.Join(root, "movies", "4k-en", "Dr. Strangelove (1964)")
+	for _, directory := range []string{movie, dotted} {
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"movie.mkv", "README"} {
+		if err := os.WriteFile(filepath.Join(movie, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	linked := filepath.Join(root, "movies", "4k-en", "Linked (2020)")
+	if err := os.Symlink(movie, linked); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, local, want string
+	}{
+		{"directory", movie, "/mnt/media/movies/4k-en/Movie (2020)"},
+		{"file", filepath.Join(movie, "movie.mkv"), "/mnt/media/movies/4k-en/Movie (2020)"},
+		{"extensionless-file", filepath.Join(movie, "README"), "/mnt/media/movies/4k-en/Movie (2020)"},
+		{"dotted-directory", dotted, "/mnt/media/movies/4k-en/Dr. Strangelove (1964)"},
+		{"symlink", linked, "/mnt/media/movies/4k-en/Linked (2020)"},
+		{"removed-file", filepath.Join(movie, "gone.mkv"), "/mnt/media/movies/4k-en/Movie (2020)/gone.mkv"},
+		{
+			"removed-directory", filepath.Join(root, "movies", "4k-en", "Gone (2020)"),
+			"/mnt/media/movies/4k-en/Gone (2020)",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake := newFakeSilo(t, http.StatusAccepted, "application/json", acceptedBody, http.StatusOK)
+			target, err := New(Config{
+				URL: fake.server.URL, Token: "test-token",
+				Rewrite: []autoscan.Rewrite{{From: "^" + regexp.QuoteMeta(root) + "/", To: "/mnt/media/"}},
+			})
+			if err != nil {
+				t.Fatalf("New error = %v, want nil", err)
+			}
+			if err := target.Scan(autoscan.Scan{Folder: test.local}); err != nil {
+				t.Fatalf("Scan error = %v, want nil", err)
+			}
+			posts := fake.requestsFor(http.MethodPost, "/api/v2/scan")
+			if len(posts) != 1 {
+				t.Fatalf("scan POST count = %d, want 1", len(posts))
+			}
+			var body scanRequest
+			if err := json.Unmarshal([]byte(posts[0].body), &body); err != nil {
+				t.Fatalf("decode scan body: %v", err)
+			}
+			if body.Path != test.want {
+				t.Errorf("POST path = %q, want %q", body.Path, test.want)
+			}
+		})
+	}
+}
+
+func TestScanAppliesRewriteBeforeMatch(t *testing.T) {
+	fake := newFakeSilo(t, http.StatusAccepted, "application/json", acceptedBody, http.StatusOK)
+	target, err := New(Config{
+		URL: fake.server.URL, Token: "test-token",
+		Rewrite: []autoscan.Rewrite{{From: "/mnt/unionfs/", To: "/mnt/media/"}},
+	})
+	if err != nil {
+		t.Fatalf("New error = %v, want nil", err)
+	}
+	if err := target.Scan(autoscan.Scan{Folder: "/mnt/unionfs/movies/4k-en/Movie (2020)"}); err != nil {
+		t.Fatalf("Scan error = %v, want nil", err)
+	}
+	posts := fake.requestsFor(http.MethodPost, "/api/v2/scan")
+	if len(posts) != 1 {
+		t.Fatalf("scan POST count = %d, want 1", len(posts))
+	}
+	var body scanRequest
+	if err := json.Unmarshal([]byte(posts[0].body), &body); err != nil {
+		t.Fatalf("decode scan body: %v", err)
+	}
+	if want := "/mnt/media/movies/4k-en/Movie (2020)"; body.Path != want {
+		t.Errorf("POST path = %q, want %q", body.Path, want)
+	}
+}
+
+func TestNewRejectsBadRewrite(t *testing.T) {
+	fake := newFakeSilo(t, http.StatusAccepted, "application/json", acceptedBody, http.StatusOK)
+	_, err := New(Config{
+		URL: fake.server.URL, Token: "test-token",
+		Rewrite: []autoscan.Rewrite{{From: "("}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "create rewriter") {
+		t.Errorf("New error = %v, want create rewriter error", err)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.requests) != 0 {
+		t.Errorf("request count = %d, want 0", len(fake.requests))
+	}
+}
+
+func TestVerbositySetsTargetLevel(t *testing.T) {
+	for _, test := range []struct {
+		verbosity string
+		want      int
+	}{{"info", 0}, {"", 1}} {
+		t.Run(test.verbosity, func(t *testing.T) {
+			output := captureLogs(t)
+			fake := newFakeSilo(t, http.StatusAccepted, "application/json", acceptedBody, http.StatusOK)
+			target, err := New(Config{URL: fake.server.URL, Token: "test-token", Verbosity: test.verbosity})
+			if err != nil {
+				t.Fatalf("New error = %v, want nil", err)
+			}
+			err = target.Scan(autoscan.Scan{Folder: "/mnt/unionfs/movies/4k-en/Movie (2020)"})
+			if !errors.Is(err, autoscan.ErrLibraryNotMatched) {
+				t.Fatalf("Scan error = %v, want ErrLibraryNotMatched", err)
+			}
+			events := logEvents(t, output, "Library Not Matched")
+			if len(events) != test.want {
+				t.Fatalf("Library Not Matched event count = %d, want %d", len(events), test.want)
+			}
+			if test.want != 0 && events[0]["level"] != "debug" {
+				t.Errorf("log level = %v, want debug", events[0]["level"])
+			}
+		})
+	}
+}
+
+func TestRequestFailedTrace(t *testing.T) {
+	output := captureLogs(t)
+	fake := newFakeSilo(t, http.StatusBadRequest, "application/problem+json",
+		`{"detail":"Path does not exist"}`, http.StatusOK)
+	target := newTestTarget(t, fake)
+	err := target.Scan(autoscan.Scan{Folder: "/mnt/media/movies/4k-en/Movie (2020)"})
+	if !errors.Is(err, autoscan.ErrScanRejected) {
+		t.Fatalf("Scan error = %v, want ErrScanRejected", err)
+	}
+	events := logEvents(t, output, "Request Failed")
+	if len(events) != 1 {
+		t.Fatalf("Request Failed event count = %d, want 1", len(events))
+	}
+	if got := events[0]["level"]; got != "trace" {
+		t.Errorf("log level = %v, want trace", got)
+	}
+	if got := events[0]["response-status"]; got != float64(http.StatusBadRequest) {
+		t.Errorf("response-status = %v, want 400", got)
+	}
+	if _, exists := events[0]["request-url"]; exists {
+		t.Error("Request Failed event contains request-url")
 	}
 }

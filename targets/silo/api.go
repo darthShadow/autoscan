@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/rs/zerolog"
+
 	"github.com/cloudbox/autoscan"
 	"github.com/cloudbox/autoscan/internal/httpclient"
 )
@@ -42,13 +44,14 @@ type problem struct {
 
 type apiClient struct {
 	client  *http.Client
+	log     zerolog.Logger
 	baseURL string
 	token   string
 }
 
-func newAPIClient(baseURL, token string) apiClient {
+func newAPIClient(baseURL, token string, log zerolog.Logger) apiClient {
 	return apiClient{
-		client: httpclient.New(), baseURL: baseURL, token: token,
+		client: httpclient.New(), log: log, baseURL: baseURL, token: token,
 	}
 }
 
@@ -62,6 +65,7 @@ func (c apiClient) do(req *http.Request) (*http.Response, error) {
 	if res.StatusCode >= http.StatusOK && res.StatusCode < http.StatusMultipleChoices {
 		return res, nil
 	}
+	c.log.Trace().Int("response-status", res.StatusCode).Msg("Request Failed")
 	defer func() { _ = res.Body.Close() }()
 
 	var response problem

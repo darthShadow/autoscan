@@ -25,7 +25,18 @@ func DSN(dbPath string, q url.Values) string {
 	return u.String()
 }
 
-// CleanedPathEqual reports whether scanFolder and libraryPath refer to the same path after cleaning.
-func CleanedPathEqual(scanFolder, libraryPath string) bool {
-	return path.Clean(scanFolder) == path.Clean(libraryPath)
+// PathWithinRoot reports whether folder is root or lies below it. Both paths
+// are compared after path.Clean, so a trailing slash on either side does not
+// matter, and /mnt/media/movies does not contain /mnt/media/movies-int. The
+// root "/" contains every absolute path.
+func PathWithinRoot(folder, root string) bool {
+	f := path.Clean(folder)
+	r := path.Clean(root)
+	if f == r {
+		return true
+	}
+	if r == "/" {
+		return strings.HasPrefix(f, "/")
+	}
+	return strings.HasPrefix(f, r+"/")
 }

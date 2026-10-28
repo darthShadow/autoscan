@@ -442,12 +442,18 @@ targets:
   silo:
     - url: http://silo.domain.tld:8080 # Silo native API listener (not the Jellyfin compat port)
       token: <SILO_API_KEY>            # unscoped sa_ key owned by an enabled admin
+      rewrite:
+        - from: /mnt/unionfs/Media/ # local file system
+          to: /data/ # path Silo reads (if applicable)
 ```
 
-The token must be an unscoped `sa_` API key owned by an enabled admin.
-The target sends the scan folder to `/api/v2/scan`.
+- URL. The URL of Silo's native API listener, not its Jellyfin compatibility port.
+- Token. The token must be an unscoped `sa_` API key owned by an enabled admin.
+- Rewrite. If Silo does not see your files at the same paths as Autoscan, rewrite them. Check out our [rewriting section](#rewriting-paths) for more info.
+
+The target sends one path to `/api/v2/scan`: the scan folder, or its parent folder when Autoscan reads the scan folder as a file.
 It logs the accepted `mode` and library, or Silo's reason when a scan is rejected.
-Removed folders are rejected; Silo's scheduled scans handle those removals.
+A path Autoscan cannot read, such as a removed one, is sent as it is; Silo's rules for vanished paths decide what to scan. A Silo build without those rules rejects it, and Autoscan drops that scan.
 
 The library list is read only at startup. Restart autoscan after changing Silo libraries.
 A scan can reach Silo more than once if an answer is lost or another target is unavailable.
@@ -538,6 +544,9 @@ targets:
   silo:
     - url: http://silo.domain.tld:8080 # Silo native API listener (not the Jellyfin compat port)
       token: <SILO_API_KEY>            # unscoped sa_ key owned by an enabled admin
+      rewrite:
+        - from: /mnt/unionfs/Media/ # local file system
+          to: /data/ # path Silo reads (if applicable)
 ```
 
 ## Other configuration options

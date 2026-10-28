@@ -110,11 +110,6 @@ func (c apiClient) Libraries() ([]library, error) {
 	libraries := make([]library, 0)
 	for _, lib := range resp {
 		for _, folder := range lib.Locations {
-			// Add trailing slash if there is none.
-			if folder != "" && folder[len(folder)-1] != '/' {
-				folder += "/"
-			}
-
 			libraries = append(libraries, library{
 				Name: lib.Name,
 				Path: folder,

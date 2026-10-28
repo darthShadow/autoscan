@@ -57,3 +57,28 @@ func TestDSN(t *testing.T) {
 		})
 	}
 }
+
+func TestPathWithinRoot(t *testing.T) {
+	for _, test := range []struct {
+		name, folder, root string
+		want               bool
+	}{
+		{"descendant", "/mnt/media/movies/X (2020)", "/mnt/media/movies", true},
+		{"equal", "/mnt/media/movies", "/mnt/media/movies", true},
+		{"root-slash", "/mnt/media/movies", "/mnt/media/movies/", true},
+		{"folder-slash", "/mnt/media/movies/", "/mnt/media/movies", true},
+		{"cleaned", "/mnt/media/movies/./X//", "/mnt/media/movies", true},
+		{"movies-int", "/mnt/media/movies-int/X", "/mnt/media/movies", false},
+		{"movies-int-slash", "/mnt/media/movies-int/X", "/mnt/media/movies/", false},
+		{"ancestor", "/mnt/media", "/mnt/media/movies", false},
+		{"traversal", "/mnt/media/movies/../tv/X", "/mnt/media/movies", false},
+		{"empty-root", "/mnt/media/movies", "", false},
+		{"filesystem-root", "/mnt/media/movies", "/", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := PathWithinRoot(test.folder, test.root); got != test.want {
+				t.Errorf("PathWithinRoot(%q, %q) = %v, want %v", test.folder, test.root, got, test.want)
+			}
+		})
+	}
+}

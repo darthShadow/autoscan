@@ -109,11 +109,7 @@ func (t target) getScanLibrary(folder string) ([]library, error) {
 	libraries := make([]library, 0)
 
 	for _, l := range t.libraries {
-		if strings.HasPrefix(folder, l.Path) {
-			libraries = append(libraries, l)
-		}
-		// Library root path
-		if autoscan.CleanedPathEqual(folder, l.Path) {
+		if autoscan.PathWithinRoot(folder, l.Path) {
 			libraries = append(libraries, l)
 		}
 	}

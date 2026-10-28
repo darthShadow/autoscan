@@ -322,6 +322,19 @@ func loadConfig() config {
 			Msg("Config Open Failed")
 	}
 
+	cfg, err := decodeConfig(file)
+	_ = file.Close()
+	if err != nil {
+		log.Fatal().
+			Err(err).
+			Msg("Config Decode Failed")
+	}
+	return cfg
+}
+
+// decodeConfig applies defaults and strictly decodes the YAML configuration.
+// It returns the decoder's error unchanged when the input is invalid.
+func decodeConfig(r io.Reader) (config, error) {
 	// set default values
 	cfg := config{
 		MinimumAge: 10 * time.Minute,
@@ -331,18 +344,10 @@ func loadConfig() config {
 		Port:       defaultPort,
 	}
 
-	decoder := yaml.NewDecoder(file)
+	decoder := yaml.NewDecoder(r)
 	decoder.SetStrict(true)
-	err = decoder.Decode(&cfg)
-	_ = file.Close()
-
-	if err != nil {
-		log.Fatal().
-			Err(err).
-			Msg("Config Decode Failed")
-	}
-
-	return cfg
+	err := decoder.Decode(&cfg)
+	return cfg, err //nolint:wrapcheck // Preserve the strict decoder error for the config caller.
 }
 
 // setupLogger configures the global zerolog logger using the CLI flags.

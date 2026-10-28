@@ -3,7 +3,6 @@ package emby
 import (
 	"fmt"
 	"path"
-	"strings"
 
 	"github.com/rs/zerolog"
 
@@ -99,11 +98,7 @@ func (t target) Scan(scan autoscan.Scan) error {
 
 func (t target) getScanLibrary(folder string) (*library, error) {
 	for _, l := range t.libraries {
-		if strings.HasPrefix(folder, l.Path) {
-			return &l, nil
-		}
-		// Library root path
-		if autoscan.CleanedPathEqual(folder, l.Path) {
+		if autoscan.PathWithinRoot(folder, l.Path) {
 			return &l, nil
 		}
 	}
