@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	sqldriver "database/sql/driver"
+	"errors"
 	"fmt"
 	"net/url"
 
@@ -25,9 +26,103 @@ type memoryConnector struct {
 func (connector memoryConnector) Connect(ctx context.Context) (sqldriver.Conn, error) {
 	conn, err := connector.Connector.Connect(sqlite3.WithMaxMemory(ctx, maxConnMemory))
 	if err != nil {
-		return nil, fmt.Errorf("open sqlite db: %w", err)
+		return nil, fmt.Errorf("open sqlite db: %w", interruptError(ctx, err))
 	}
-	return conn, nil
+	// The pinned ncruces driver implements these optional database/sql interfaces.
+	return interruptConn{conn.(sqliteConn)}, nil //nolint:forcetypeassert // Fixed upstream driver contract.
+}
+
+type sqliteConn interface {
+	driver.Conn
+	sqldriver.ExecerContext
+	sqldriver.NamedValueChecker
+}
+
+type interruptConn struct{ sqliteConn }
+
+func (conn interruptConn) Prepare(query string) (sqldriver.Stmt, error) {
+	return conn.PrepareContext(context.Background(), query)
+}
+
+func (conn interruptConn) PrepareContext(ctx context.Context, query string) (sqldriver.Stmt, error) {
+	stmt, err := conn.sqliteConn.PrepareContext(ctx, query)
+	if err != nil {
+		return nil, interruptError(ctx, err)
+	}
+	return interruptStmt{stmt.(sqliteStmt)}, nil //nolint:forcetypeassert // Fixed upstream driver contract.
+}
+
+func (conn interruptConn) BeginTx(ctx context.Context, opts sqldriver.TxOptions) (sqldriver.Tx, error) {
+	tx, err := conn.sqliteConn.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, interruptError(ctx, err)
+	}
+	return tx, nil
+}
+
+func (conn interruptConn) ExecContext(
+	ctx context.Context, query string, args []sqldriver.NamedValue,
+) (sqldriver.Result, error) {
+	result, err := conn.sqliteConn.ExecContext(ctx, query, args)
+	if err != nil {
+		return nil, interruptError(ctx, err)
+	}
+	return result, nil
+}
+
+type sqliteStmt interface {
+	sqldriver.Stmt
+	sqldriver.StmtExecContext
+	sqldriver.StmtQueryContext
+	sqldriver.NamedValueChecker
+}
+
+type interruptStmt struct{ sqliteStmt }
+
+func (stmt interruptStmt) ExecContext(ctx context.Context, args []sqldriver.NamedValue) (sqldriver.Result, error) {
+	result, err := stmt.sqliteStmt.ExecContext(ctx, args)
+	if err != nil {
+		return nil, interruptError(ctx, err)
+	}
+	return result, nil
+}
+
+func (stmt interruptStmt) QueryContext(ctx context.Context, args []sqldriver.NamedValue) (sqldriver.Rows, error) {
+	rows, err := stmt.sqliteStmt.QueryContext(ctx, args)
+	if err != nil {
+		return nil, interruptError(ctx, err)
+	}
+	return interruptRows{rows.(sqliteRows), ctx}, nil //nolint:forcetypeassert // Fixed upstream driver contract.
+}
+
+type sqliteRows interface {
+	sqldriver.Rows
+	sqldriver.RowsColumnTypeDatabaseTypeName
+	sqldriver.RowsColumnTypeNullable
+	sqldriver.RowsColumnTypeScanType
+}
+
+type interruptRows struct {
+	sqliteRows
+
+	ctx context.Context //nolint:containedctx // Rows.Next and Close have no context parameter.
+}
+
+func (rows interruptRows) Next(values []sqldriver.Value) error {
+	return interruptError(rows.ctx, rows.sqliteRows.Next(values))
+}
+
+func (rows interruptRows) Close() error {
+	return interruptError(rows.ctx, rows.sqliteRows.Close())
+}
+
+// interruptError adds the context error to an error the context's end caused. The busy handler stops
+// retrying once the context ends and SQLite then reports BUSY, not INTERRUPT (ncruces conn.go Xgo_busy_timeout).
+func interruptError(ctx context.Context, err error) error {
+	if (errors.Is(err, sqlite3.INTERRUPT) || errors.Is(err, sqlite3.BUSY)) && ctx.Err() != nil {
+		return fmt.Errorf("%w: %w", err, ctx.Err())
+	}
+	return err
 }
 
 func init() {
@@ -53,13 +148,21 @@ func getDSN(dbPath string, writable bool) string {
 	// https://sqlite.org/uri.html#uricache
 	params.Set("cache", "private")
 
-	// Enable normal synchronous mode for better performance.
-	// https://sqlite.org/pragma.html#pragma_synchronous
-	params.Add("_pragma", "synchronous(NORMAL)")
+	// The ncruces driver requires busy timeout and locking mode before other pragmas.
+	// https://pkg.go.dev/github.com/ncruces/go-sqlite3/driver#hdr-Setting_PRAGMAs
+	// synchronous and cache_size read the schema and need the busy handler when it is locked.
+	// Set busy timeout to 10 seconds.
+	// https://sqlite.org/pragma.html#pragma_busy_timeout
+	// Source: sqlite3-builds src/auto_extension.c.
+	params.Add("_pragma", "busy_timeout(10000)")
 
 	// Set the locking mode to normal.
 	// https://sqlite.org/pragma.html#pragma_locking_mode
 	params.Add("_pragma", "locking_mode(NORMAL)")
+
+	// Enable normal synchronous mode for better performance.
+	// https://sqlite.org/pragma.html#pragma_synchronous
+	params.Add("_pragma", "synchronous(NORMAL)")
 
 	// Set the cache size to 1 GiB.
 	// https://sqlite.org/pragma.html#pragma_cache_size
@@ -80,11 +183,6 @@ func getDSN(dbPath string, writable bool) string {
 	// https://sqlite.org/foreignkeys.html
 	params.Add("_pragma", "foreign_keys(ON)")
 
-	// Set busy timeout to 10 seconds.
-	// https://sqlite.org/pragma.html#pragma_busy_timeout
-	// Source: sqlite3-builds src/auto_extension.c.
-	params.Add("_pragma", "busy_timeout(10000)")
-
 	// Set temp store to memory.
 	// https://sqlite.org/pragma.html#pragma_temp_store
 	params.Add("_pragma", "temp_store(MEMORY)")
@@ -98,13 +196,15 @@ func getDSN(dbPath string, writable bool) string {
 	params.Add("_pragma", "threads(8)")
 
 	if writable {
+		// Set auto_vacuum to incremental.
+		// https://sqlite.org/pragma.html#pragma_auto_vacuum
+		// auto_vacuum must precede journal_mode(WAL): this driver runs _pragma values in order,
+		// and switching a new file to WAL writes its header, after which auto_vacuum changes only through VACUUM.
+		params.Add("_pragma", "auto_vacuum(INCREMENTAL)")
+
 		// Enable WAL mode for better performance.
 		// https://sqlite.org/wal.html
 		params.Add("_pragma", "journal_mode(WAL)")
-
-		// Set auto_vacuum to incremental.
-		// https://sqlite.org/pragma.html#pragma_auto_vacuum
-		params.Add("_pragma", "auto_vacuum(INCREMENTAL)")
 
 		// Enable read-write-create mode for writable databases.
 		// https://sqlite.org/c3ref/open.html

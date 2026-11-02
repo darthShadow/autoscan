@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -48,6 +49,8 @@ func getRouter(cfg config, proc *processor.Processor) chi.Router {
 
 	// Health check
 	mux.Get("/health", healthHandler)
+	mux.Get("/version", versionHandler)
+	mux.Head("/version", versionHandler)
 
 	// HTTP-Triggers
 	mux.Route("/triggers", func(sub chi.Router) {
@@ -118,6 +121,14 @@ func getRouter(cfg config, proc *processor.Processor) chi.Router {
 }
 
 // Other Handlers
+
+// versionHandler reports the release variables set at build time.
+func versionHandler(rw http.ResponseWriter, _ *http.Request) {
+	rw.Header().Set("Content-Type", "application/json")
+	body := map[string]string{"version": Version, "commit": GitCommit, "timestamp": Timestamp}
+	_ = json.NewEncoder(rw).Encode(body) //nolint:errchkjson // Best-effort write to the ResponseWriter.
+}
+
 func healthHandler(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
 	if ready.Load() {

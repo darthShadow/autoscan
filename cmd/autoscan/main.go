@@ -188,6 +188,7 @@ func main() {
 	router := getRouter(cfg, proc)
 
 	startHTTPServers(cfg, router)
+	startDebugServer(cfg.Port)
 
 	log.Info().
 		Int("manual", 1).

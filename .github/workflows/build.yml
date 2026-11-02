@@ -90,6 +90,9 @@ jobs:
       - name: lint release variant
         run: CGO_ENABLED=0 go tool golangci-lint run ./...
 
+      - name: test release variant
+        run: CGO_ENABLED=0 go test -count=1 ./internal/sqlite/...
+
       - name: vet
         run: go vet ./...
 

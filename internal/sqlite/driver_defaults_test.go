@@ -6,6 +6,28 @@ import (
 	"testing"
 )
 
+func TestNewDBSetsIncrementalAutoVacuum(t *testing.T) {
+	db, err := NewDB(t.Context(), filepath.Join(t.TempDir(), "vacuum.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	var vacuum int
+	if err := db.RW().QueryRowContext(t.Context(), "PRAGMA auto_vacuum").Scan(&vacuum); err != nil {
+		t.Fatal(err)
+	}
+	if vacuum != 2 {
+		t.Errorf("PRAGMA auto_vacuum = %d, want 2", vacuum)
+	}
+	var journal string
+	if err := db.RW().QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&journal); err != nil {
+		t.Fatal(err)
+	}
+	if journal != "wal" {
+		t.Errorf("PRAGMA journal_mode = %q, want wal", journal)
+	}
+}
+
 func TestConnectionPragmaDefaults(t *testing.T) {
 	db, err := NewDB(t.Context(), filepath.Join(t.TempDir(), "defaults.db"))
 	if err != nil {
